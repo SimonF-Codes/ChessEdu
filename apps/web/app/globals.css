@@ -1,0 +1,22 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-board-dark: #6f8f6a;
+  --color-board-light: #eeeed2;
+  --color-ink: #1c1b19;
+  --color-parchment: #faf8f4;
+}
+
+:root {
+  color-scheme: light dark;
+}
+
+body {
+  @apply bg-[--color-parchment] text-[--color-ink] antialiased;
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    @apply bg-neutral-950 text-neutral-100;
+  }
+}

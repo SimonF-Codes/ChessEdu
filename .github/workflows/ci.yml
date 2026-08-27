@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  verify:
+    name: lint · typecheck · test · build
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        # pgvector is part of the schema, so CI runs the image that has it.
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: chessedu
+          POSTGRES_PASSWORD: chessedu
+          POSTGRES_DB: chessedu_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U chessedu"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://chessedu:chessedu@localhost:5432/chessedu_test
+      TEST_DATABASE_URL: postgres://chessedu:chessedu@localhost:5432/chessedu_test
+      CHESSCOM_CONTACT: ci@chessedu.invalid
+      AUTH_SECRET: ci-only-not-a-real-secret
+      AUTH_GOOGLE_ID: ci
+      AUTH_GOOGLE_SECRET: ci
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Enable pgvector
+        run: psql "$DATABASE_URL" -c 'create extension if not exists vector;'
+
+      - name: Apply migrations
+        run: npm run db:migrate
+
+      - name: Test
+        # Includes the Postgres-backed suites, which are skipped without TEST_DATABASE_URL.
+        run: npm run test:coverage
+
+      - name: Build
+        run: npm run build
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: coverage/
+          retention-days: 7
+
+  docs:
+    name: docs kept in step
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Warn when schema or architecture changed without a doc update
+        run: |
+          base="origin/${{ github.base_ref }}"
+          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+          changed=$(git diff --name-only "$base"...HEAD)
+
+          touches_shape=$(echo "$changed" | grep -E '^(packages/db/src/schema.ts|apps/worker/src/handlers/)' || true)
+          touches_docs=$(echo "$changed" | grep -E '^docs/' || true)
+
+          if [ -n "$touches_shape" ] && [ -z "$touches_docs" ]; then
+            echo "::warning::This PR changes the data model or a job handler but no doc under docs/."
+            echo "The cycle in CONTRIBUTING.md is document, then test, then implement."
+          fi

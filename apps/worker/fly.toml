@@ -1,0 +1,28 @@
+app = "chessedu-worker"
+primary_region = "ams"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[deploy]
+  # Migrations run here and nowhere else: one place, once, before the new code starts.
+  # The web app never migrates on boot. See docs/ci-cd.md.
+  release_command = "npm run db:migrate"
+  strategy = "immediate"
+
+[env]
+  NODE_ENV = "production"
+  STOCKFISH_PATH = "/usr/games/stockfish"
+  STOCKFISH_DEPTH = "16"
+  STOCKFISH_THREADS = "2"
+  STOCKFISH_HASH_MB = "512"
+
+# No [[services]] block: the worker takes no inbound traffic.
+
+[[vm]]
+  # Analysis is CPU bound, and Stockfish gets one thread per core with room to spare.
+  size = "performance-2x"
+  memory = "2gb"
+
+[[restart]]
+  policy = "always"

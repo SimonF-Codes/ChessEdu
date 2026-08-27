@@ -1,0 +1,36 @@
+{
+  "name": "chessedu",
+  "private": true,
+  "version": "0.0.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "npm run dev --workspace @chessedu/web",
+    "dev:worker": "npm run dev --workspace @chessedu/worker",
+    "build": "npm run build --workspaces --if-present",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "db:generate": "npm run generate --workspace @chessedu/db",
+    "db:migrate": "npm run migrate --workspace @chessedu/db",
+    "db:studio": "npm run studio --workspace @chessedu/db"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@types/node": "^22.10.5",
+    "@vitest/coverage-v8": "^2.1.8",
+    "eslint": "^9.18.0",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.20.0",
+    "vitest": "^2.1.8"
+  }
+}

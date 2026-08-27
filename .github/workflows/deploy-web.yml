@@ -1,0 +1,59 @@
+name: Deploy web
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/web/**'
+      - 'packages/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/deploy-web.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-web
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ steps.deploy.outputs.url }}
+
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm install --global vercel@latest
+
+      - run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+
+      - run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+
+      - id: deploy
+        run: |
+          url=$(vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }})
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke test the deployment
+        id: smoke
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          npm run test:e2e --workspace @chessedu/web
+        env:
+          E2E_BASE_URL: ${{ steps.deploy.outputs.url }}
+
+      - name: Roll back if the smoke test failed
+        if: failure() && steps.deploy.outcome == 'success'
+        run: vercel rollback --token=${{ secrets.VERCEL_TOKEN }} --yes
