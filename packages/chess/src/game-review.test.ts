@@ -17,7 +17,7 @@ import {
   selectKeyMoments,
   uciToSan,
   winPercentOf,
-} from './review';
+} from './game-review';
 
 /** 1.e4 e5 2.Bc4 Nc6 3.Qh5 Nf6?? 4.Qxf7# — short, and it ends on a real blunder. */
 const SCHOLARS_MATE = ['e4', 'e5', 'Bc4', 'Nc6', 'Qh5', 'Nf6', 'Qxf7#'];

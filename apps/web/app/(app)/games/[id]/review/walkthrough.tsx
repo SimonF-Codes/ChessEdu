@@ -10,7 +10,7 @@ import {
   type ReviewMove,
   formatEvaluation,
   winPercentOf,
-} from '@chessedu/chess/review';
+} from '@chessedu/chess/game-review';
 
 import type { MoveComment } from '../../../../../lib/coach';
 import { formatCitation } from '../../../../../lib/coach/retrieval';

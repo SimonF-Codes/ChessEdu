@@ -14,7 +14,7 @@ import { type Phase, phaseOf } from './phase';
 /**
  * Re-exported so the browser can import this module on its own. `./index` reaches `link.ts`,
  * which needs `node:crypto` and cannot be bundled for the client — the walkthrough UI imports
- * `@chessedu/chess/review` instead, and needs these types with it.
+ * `@chessedu/chess/game-review` instead, and needs these types with it.
  */
 export type { Classification, Color, Evaluation } from './classify';
 export type { GameResult } from './pgn';

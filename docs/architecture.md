@@ -104,7 +104,7 @@ test, not inside a React component or a worker loop.
 It ships TypeScript source rather than a build, so an import is a bundling decision. The
 barrel (`@chessedu/chess`) reaches `link.ts`, which needs `node:crypto` and therefore cannot be
 bundled for the browser. **Client components import a subpath instead** —
-`@chessedu/chess/review` is the browser-safe entry the walkthrough UI uses. Adding a new
+`@chessedu/chess/game-review` is the browser-safe entry the walkthrough UI uses. Adding a new
 browser-facing module means adding a matching entry to that package's `exports`.
 
 ## 5. Data model
@@ -185,7 +185,7 @@ explanation on the handful of moves that actually decided it.
 
 ```mermaid
 flowchart LR
-    MA[("move_analysis<br/>game_analysis")] --> RV["buildGameReview()<br/>packages/chess/src/review.ts"]
+    MA[("move_analysis<br/>game_analysis")] --> RV["buildGameReview()<br/>packages/chess/src/game-review.ts"]
     RV --> DET["Deterministic annotation<br/>every ply"]
     RV --> KM["selectKeyMoments()"]
     KM --> FACT["Given facts<br/>lib/coach/facts.ts"]

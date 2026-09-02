@@ -11,7 +11,7 @@
     "plugins": [{ "name": "next" }],
     "paths": {
       "@chessedu/chess": ["../../packages/chess/src/index.ts"],
-      "@chessedu/chess/review": ["../../packages/chess/src/review.ts"],
+      "@chessedu/chess/game-review": ["../../packages/chess/src/game-review.ts"],
       "@chessedu/chesscom": ["../../packages/chesscom/src/index.ts"],
       "@chessedu/db": ["../../packages/db/src/index.ts"]
     }
