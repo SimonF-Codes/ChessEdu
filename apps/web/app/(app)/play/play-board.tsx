@@ -55,7 +55,18 @@ const colorName = (color: Color) => (color === 'w' ? 'White' : 'Black');
 const describe = (error: unknown) =>
   error instanceof Error ? error.message : 'the engine stopped responding';
 
-export function PlayBoard() {
+export interface PlayBoardProps {
+  /**
+   * Where to start the level picker. Chosen from the player's own rating on the server —
+   * see recommendBotLevel. The picker still overrides it; this is a starting point, not a
+   * verdict.
+   */
+  initialLevel?: BotLevel;
+  /** One line explaining that choice, so the rung is not presented as an oracle. */
+  recommendation?: string;
+}
+
+export function PlayBoard({ initialLevel, recommendation }: PlayBoardProps = {}) {
   // `?engineLog=1` puts every UCI line in the console — see docs/browser-engine.md.
   const log = useMemo(
     () =>
@@ -67,7 +78,7 @@ export function PlayBoard() {
 
   const gameRef = useRef(new Chess());
   const [position, setPosition] = useState<Position>(() => snapshot(gameRef.current));
-  const [level, setLevel] = useState<BotLevel>(DEFAULT_BOT_LEVEL);
+  const [level, setLevel] = useState<BotLevel>(initialLevel ?? DEFAULT_BOT_LEVEL);
   const [side, setSide] = useState<SideChoice>('w');
   const [playerColor, setPlayerColor] = useState<Color>('w');
   const [gameId, setGameId] = useState(0);
@@ -232,6 +243,11 @@ export function PlayBoard() {
               ))}
             </select>
             <span className="block text-xs text-neutral-500">{level.blurb}</span>
+            {/* Shown only while the recommendation still stands. Once the player has picked a
+                rung themselves, explaining the choice they overrode would just be noise. */}
+            {recommendation && initialLevel && level.id === initialLevel.id ? (
+              <span className="block text-xs text-neutral-400">{recommendation}</span>
+            ) : null}
           </label>
 
           <label className="block space-y-1">

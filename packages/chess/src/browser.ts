@@ -11,6 +11,7 @@
  */
 
 export * from './bot';
+export * from './recommend';
 export * from './classify';
 export * from './outcome';
 export * from './phase';

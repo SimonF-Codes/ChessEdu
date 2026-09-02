@@ -1,10 +1,15 @@
+import { loadPlayRecommendation } from '../../../lib/play';
 import { requireUser } from '../../../lib/session';
 import { PlayBoard } from './play-board';
 
 export const metadata = { title: 'Play — ChessEdu' };
 
 export default async function PlayPage() {
-  await requireUser();
+  const user = await requireUser();
+
+  // Chosen on the server from the player's own rated games, so the page opens on a sensible
+  // rung rather than a fixed default. See apps/web/lib/play.ts.
+  const recommendation = await loadPlayRecommendation(user.id);
 
   return (
     <div className="space-y-8">
@@ -17,7 +22,7 @@ export default async function PlayPage() {
         </p>
       </div>
 
-      <PlayBoard />
+      <PlayBoard initialLevel={recommendation.level} recommendation={recommendation.message} />
     </div>
   );
 }
