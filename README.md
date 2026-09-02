@@ -58,13 +58,13 @@ The worker also needs a Stockfish binary; point `STOCKFISH_PATH` at it.
 | `apps/web` | The site: UI, auth, server actions, API routes |
 | `apps/worker` | Long-running service: Chess.com ingest and Stockfish analysis |
 | `packages/db` | Drizzle schema, migrations, client, job queue. The single schema owner |
-| `packages/chess` | Pure domain logic — classification, phases, accuracy, PGN, link rules |
+| `packages/chess` | Pure domain logic — classification, phases, accuracy, the strength model, PGN, link rules |
 | `packages/chesscom` | Chess.com API client: serial, conditional, rate-limit aware |
 | `docs/` | Architecture, ADRs, runbooks |
 
 ## Docs
 
-- [Architecture](docs/architecture.md) — system shape, data model, security posture, diagrams
+- [Architecture](docs/architecture.md) — system shape, data model, the strength model, security posture, diagrams
 - [ADR 0001](docs/adr/0001-stack.md) — why this stack, and what lost
 - [Linking a Chess.com account](docs/chess-com-linking.md) — why a nonce, and how ingest behaves
 - [CI/CD](docs/ci-cd.md) — pipeline, environments, migration policy
