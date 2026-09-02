@@ -20,8 +20,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <Link href="/dashboard" className="font-semibold">
             ChessEdu
           </Link>
-          <Link href="/dashboard" className="text-neutral-600 hover:underline dark:text-neutral-400">
+          <Link
+            href="/dashboard"
+            className="text-neutral-600 hover:underline dark:text-neutral-400"
+          >
             Dashboard
+          </Link>
+          <Link href="/review" className="text-neutral-600 hover:underline dark:text-neutral-400">
+            Review
           </Link>
           <Link href="/link" className="text-neutral-600 hover:underline dark:text-neutral-400">
             Accounts
