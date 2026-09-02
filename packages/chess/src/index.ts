@@ -1,4 +1,3 @@
-export * from './classify';
+export * from './browser';
 export * from './link';
 export * from './pgn';
-export * from './phase';

@@ -24,23 +24,29 @@ flowchart LR
 
 ## Workflows
 
-| File | Trigger | Does |
-|---|---|---|
-| `ci.yml` | PR + push to `main` | lint, typecheck, migrate against a throwaway Postgres, `vitest run --coverage`, build both apps |
-| `deploy-web.yml` | push to `main` (paths: `apps/web`, `packages/**`) | Vercel production deploy, then a Playwright smoke test against the live URL |
-| `deploy-worker.yml` | push to `main` (paths: `apps/worker`, `packages/**`) | `flyctl deploy` with a release command that runs migrations, then a heartbeat check |
-| `preview.yml` | PR | Vercel preview deploy, comments the URL on the PR |
+| File                | Trigger                                              | Does                                                                                            |
+| ------------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `ci.yml`            | PR + push to `main`                                  | lint, typecheck, migrate against a throwaway Postgres, `vitest run --coverage`, build both apps |
+| `deploy-web.yml`    | push to `main` (paths: `apps/web`, `packages/**`)    | Vercel production deploy, then a Playwright smoke test against the live URL                     |
+| `deploy-worker.yml` | push to `main` (paths: `apps/worker`, `packages/**`) | `flyctl deploy` with a release command that runs migrations, then a heartbeat check             |
+| `preview.yml`       | PR                                                   | Vercel preview deploy, comments the URL on the PR                                               |
 
 CI runs Postgres 17 with `pgvector` as a service container, so migrations and the queue's
 `SKIP LOCKED` behaviour are exercised against real Postgres rather than a mock.
 
+Every build of the web app — in CI, in `vercel build`, and locally — first runs
+`scripts/fetch-stockfish.mjs` from its `prebuild` script, which downloads the browser
+Stockfish from unpkg and verifies it against a pinned SHA-256. That makes the build depend on
+one more host being up, and makes a checksum mismatch a build failure rather than a broken
+page. Both are deliberate; see [browser-engine.md](./browser-engine.md).
+
 ## Required repository secrets
 
-| Secret | Used by |
-|---|---|
-| `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` | `deploy-web`, `preview` |
-| `FLY_API_TOKEN` | `deploy-worker` |
-| `DATABASE_URL` (production, for the migration release command) | `deploy-worker` |
+| Secret                                                         | Used by                 |
+| -------------------------------------------------------------- | ----------------------- |
+| `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`           | `deploy-web`, `preview` |
+| `FLY_API_TOKEN`                                                | `deploy-worker`         |
+| `DATABASE_URL` (production, for the migration release command) | `deploy-worker`         |
 
 Runtime secrets — `AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, `ANTHROPIC_API_KEY`,
 `DATABASE_URL` — live in the Vercel and Fly environment configs, not in GitHub. See
@@ -56,8 +62,8 @@ column before dropping it.
 
 ## Environments
 
-| Environment | Web | Worker | Database |
-|---|---|---|---|
-| local | `npm run dev` | `npm run dev:worker` | local Postgres in Docker, or a Neon dev branch |
-| preview (per PR) | Vercel preview | not deployed | Neon branch, seeded |
-| production | Vercel prod | Fly app `chessedu-worker` | Neon primary |
+| Environment      | Web            | Worker                    | Database                                       |
+| ---------------- | -------------- | ------------------------- | ---------------------------------------------- |
+| local            | `npm run dev`  | `npm run dev:worker`      | local Postgres in Docker, or a Neon dev branch |
+| preview (per PR) | Vercel preview | not deployed              | Neon branch, seeded                            |
+| production       | Vercel prod    | Fly app `chessedu-worker` | Neon primary                                   |

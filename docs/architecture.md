@@ -13,20 +13,20 @@ Deployed as a **live website** with Google sign-in and a verified Chess.com acco
 
 ## 2. Stack
 
-| Layer | Choice | Why |
-|---|---|---|
-| Web app | Next.js 15 (App Router) + React 19 + TypeScript | One codebase for UI, server actions and API routes; first-class Vercel deploy |
-| Styling | Tailwind CSS v4 | No config file, fast, consistent |
-| Auth | Auth.js v5 (NextAuth), Google provider, DB sessions | Standard and audited; DB sessions give server-side revocation |
-| Database | Postgres (Neon) + `pgvector` | Relational core *and* the RAG store in one datastore |
-| ORM | Drizzle | Typed schema-as-code, real SQL escape hatch, good migrations |
-| Job queue | Postgres `SELECT ... FOR UPDATE SKIP LOCKED` | Deep analysis is minutes long and cannot run in a serverless request. No Redis to operate |
-| Analysis worker | Long-running Node service on Fly.io driving Stockfish over UCI | Needs a persistent process, CPU, and a real filesystem for NNUE weights |
-| Browser engine | `stockfish.wasm` in a Web Worker | Instant hints and play without burning server CPU |
-| Board UI | `chess.js` + `react-chessboard` | De-facto standard pair, well maintained |
-| Coaching LLM | Anthropic API (`claude-opus-5`), server-side | It explains; it never evaluates — see section 6 |
-| Tests | Vitest, plus Playwright for one smoke E2E | Fast unit/integration loop, thin browser layer |
-| CI/CD | GitHub Actions to Vercel (web) and Fly.io (worker) | See [ci-cd.md](./ci-cd.md) |
+| Layer           | Choice                                                         | Why                                                                                                                                                                 |
+| --------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Web app         | Next.js 15 (App Router) + React 19 + TypeScript                | One codebase for UI, server actions and API routes; first-class Vercel deploy                                                                                       |
+| Styling         | Tailwind CSS v4                                                | No config file, fast, consistent                                                                                                                                    |
+| Auth            | Auth.js v5 (NextAuth), Google provider, DB sessions            | Standard and audited; DB sessions give server-side revocation                                                                                                       |
+| Database        | Postgres (Neon) + `pgvector`                                   | Relational core _and_ the RAG store in one datastore                                                                                                                |
+| ORM             | Drizzle                                                        | Typed schema-as-code, real SQL escape hatch, good migrations                                                                                                        |
+| Job queue       | Postgres `SELECT ... FOR UPDATE SKIP LOCKED`                   | Deep analysis is minutes long and cannot run in a serverless request. No Redis to operate                                                                           |
+| Analysis worker | Long-running Node service on Fly.io driving Stockfish over UCI | Needs a persistent process, CPU, and a real filesystem for NNUE weights                                                                                             |
+| Browser engine  | Stockfish 18 `lite`, **single-threaded** WASM, in a Web Worker | Instant hints and bot play without burning server CPU, and without the COOP/COEP headers a threaded build would need — see [ADR 0002](./adr/0002-browser-engine.md) |
+| Board UI        | `chess.js` + `react-chessboard`                                | De-facto standard pair, well maintained                                                                                                                             |
+| Coaching LLM    | Anthropic API (`claude-opus-5`), server-side                   | It explains; it never evaluates — see section 6                                                                                                                     |
+| Tests           | Vitest, plus Playwright for one smoke E2E                      | Fast unit/integration loop, thin browser layer                                                                                                                      |
+| CI/CD           | GitHub Actions to Vercel (web) and Fly.io (worker)             | See [ci-cd.md](./ci-cd.md)                                                                                                                                          |
 
 **Rejected:** a desktop app (the idea note left this open — the website wins because the game
 history lives in the cloud anyway and there is nothing to install); Redis/BullMQ (a second
@@ -39,7 +39,7 @@ inside serverless functions (execution time caps make full-history analysis impo
 flowchart TB
     subgraph browser["Browser"]
         UI["Next.js UI<br/>chess.js + react-chessboard"]
-        WASM["stockfish.wasm<br/>(Web Worker)"]
+        WASM["Stockfish 18 lite<br/>single-threaded WASM<br/>(Web Worker)"]
         UI <--> WASM
     end
 
@@ -97,8 +97,8 @@ chessedu/
 └── .github/workflows CI + CD
 ```
 
-`packages/chess` is deliberately **I/O-free**. Every rule that decides *what counts as a
-blunder*, *when the endgame starts*, or *whether a link is verified* lives there behind a unit
+`packages/chess` is deliberately **I/O-free**. Every rule that decides _what counts as a
+blunder_, _when the endgame starts_, or _whether a link is verified_ lives there behind a unit
 test, not inside a React component or a worker loop.
 
 ## 5. Data model
@@ -128,7 +128,7 @@ from the idea note, and it is enforced structurally rather than by prompt discip
 
 - Every number a coaching response cites — centipawn loss, best move, accuracy, phase
   strength — is read from `move_analysis` / `game_analysis`, computed by Stockfish, and passed
-  to the model as *given facts* in the prompt.
+  to the model as _given facts_ in the prompt.
 - The model is never asked "was this a blunder?". It is asked "here is the blunder and the
   engine line; explain the idea the player missed."
 - Reference-literature citations come from `corpus_chunks` retrieved via pgvector, so a claim
@@ -169,7 +169,48 @@ Ingest is **serial and conditional**: Chess.com rate-limits parallel requests an
 `If-Modified-Since`, so re-syncing an unchanged month costs a single 304. See
 [chess-com-linking.md](./chess-com-linking.md).
 
-## 8. Security posture
+## 8. Playing against the engine
+
+`/play` is the one place the engine runs client-side rather than on the worker. Nothing about a
+casual game is worth a network round trip, and interactive moves must never queue behind the
+multi-minute batch analysis on the single Fly machine.
+
+```mermaid
+sequenceDiagram
+    actor U as User
+    participant B as play-board (client)
+    participant G as chess.js
+    participant E as Stockfish worker
+
+    Note over B,E: on mount: load /engines/…, uci, isready
+    B->>E: setoption UCI_LimitStrength / UCI_Elo
+    U->>B: drag a piece
+    B->>G: move() — legality, and the new FEN
+    G-->>B: ok, or rejected (snap back)
+    B->>E: position fen … / go movetime 300
+    E-->>B: info … / bestmove e2e4
+    B->>G: apply the bot's move
+    B-->>U: board updates, or game over
+```
+
+Three rules hold this together:
+
+- **chess.js is the referee, not the engine.** Legality, check, stalemate, the fifty-move rule
+  and threefold repetition are all decided by chess.js on the client. Stockfish is asked for a
+  move and nothing else; a bot move is applied through the same `move()` call as a human one,
+  so an illegal one would be rejected rather than trusted.
+- **Strength is a pure function.** `UCI_Elo` comes from `packages/chess/src/bot.ts`, unit tested,
+  clamped to the 1320–3190 range Stockfish accepts. No component decides how strong a bot is.
+- **Nothing is persisted.** A play session lives in React state and dies with the tab. There is
+  no table, no server action and no job for it, so nothing here can reach a user's real history
+  — the ownership chain in §5 is untouched by design. Saving played games would need a schema
+  change in `packages/db` and would make them analysable like ingested ones; it is not built.
+
+The bot is Stockfish only. Human-like engines (Maia, Lc0) stay in §10 — different weights,
+different runtime, and the reason the Elo floor is 1320 rather than something a beginner would
+enjoy.
+
+## 9. Security posture
 
 - **Sessions** are database-backed, in `httpOnly` + `Secure` + `SameSite=Lax` cookies. No JWT
   in local storage; a session can be revoked server-side.
@@ -184,9 +225,11 @@ Ingest is **serial and conditional**: Chess.com rate-limits parallel requests an
   browser.
 - **The worker exposes no inbound port.** It polls Postgres; nothing can call it.
 
-## 9. Open questions carried from the idea note
+## 10. Open questions carried from the idea note
 
 - Lichess as a second ingest source. The `platform` column exists for it; nothing else does.
 - Reference-literature licensing. Bootstrap on public-domain classics only.
 - Maia/Lc0 bot hosting is heavier than Stockfish — likely a separate Fly machine running a
-  CPU Lc0 build with small nets. Not scaffolded yet.
+  CPU Lc0 build with small nets. Not scaffolded yet. This is also what a sub-1320 bot needs:
+  Stockfish's `UCI_Elo` stops there, and weakening it further produces inhuman blunders
+  ([ADR 0002](./adr/0002-browser-engine.md)).

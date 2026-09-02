@@ -1,9 +1,14 @@
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 
-import type { Evaluation } from '@chessedu/chess';
-
-import { type EngineInfo, parseBestMove, parseInfoLine, sideToMove, toWhitePerspective } from './uci';
+import {
+  type EngineInfo,
+  type Evaluation,
+  parseBestMove,
+  parseInfoLine,
+  sideToMove,
+  toWhitePerspective,
+} from '@chessedu/chess';
 
 /**
  * A Stockfish process spoken to over UCI.
