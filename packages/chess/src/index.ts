@@ -4,4 +4,6 @@ export * from './deviation';
 export * from './link';
 export * from './pgn';
 export * from './repertoire';
+export * from './session-order';
+export * from './srs';
 export * from './strength';

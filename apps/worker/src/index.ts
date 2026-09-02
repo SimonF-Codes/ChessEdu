@@ -17,7 +17,7 @@ import { type IngestPayload, runIngest } from './handlers/ingest';
  * The worker: claim a job, run it, repeat.
  *
  * It exposes no inbound port. Nothing can call it — it only ever polls Postgres, which is why
- * it needs no authentication of its own. See docs/architecture.md, section 12.
+ * it needs no authentication of its own. See docs/architecture.md, section 13.
  */
 
 const config = loadConfig();

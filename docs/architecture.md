@@ -183,7 +183,7 @@ scopes every query by the result, exactly like the server actions do.
 `history` is echoed back to the model as conversation, but it is **not** a source of facts. Every
 number in the next answer is re-read from `move_analysis` / `game_analysis` on this request. A
 client that edits an assistant turn to claim a different evaluation changes the prose it is
-replying to and nothing else. Persisting threads server-side is deferred — see section 13.
+replying to and nothing else. Persisting threads server-side is deferred — see section 14.
 
 ### 7.3 Response — an SSE stream
 
@@ -365,7 +365,7 @@ requests, because a silent cache miss is otherwise invisible until the bill arri
 - **Retrieval** over `corpus_chunks`. Until it lands the endpoint runs with zero chunks and emits no
   citations; the contract does not change when it arrives.
 - **The rate-limit mechanism.** The surface is fixed (`429` + `Retry-After`); where the counter lives
-  is open — see section 13.
+  is open — see section 14.
 
 ## 8. Analysis pipeline
 
@@ -554,7 +554,7 @@ Three rules hold this together:
   — the ownership chain in §5 is untouched by design. Saving played games would need a schema
   change in `packages/db` and would make them analysable like ingested ones; it is not built.
 
-The bot is Stockfish only. Human-like engines (Maia, Lc0) stay in §13 — different weights,
+The bot is Stockfish only. Human-like engines (Maia, Lc0) stay in §14 — different weights,
 different runtime, and the reason the Elo floor is 1320 rather than something a beginner would
 enjoy.
 
@@ -609,7 +609,60 @@ second evaluator. This is the coaching boundary of section 6 applied to opening 
 All of it lives in `packages/chess` (`book.ts`, `repertoire.ts`, `deviation.ts`) behind unit
 tests. `apps/web/lib/openings.ts` does the reading; the page at `/openings` only renders.
 
-## 12. Security posture
+## 12. Puzzle review
+
+Puzzles are the player's own blunders, replayed. `generatePuzzles` in the analysis handler writes
+one row per blunder the player made — the position before the mistake, with the engine's move as
+the solution — and review is what reads them back.
+
+```mermaid
+flowchart LR
+    subgraph db["Postgres"]
+        P[("puzzle<br/>due_at, ease, interval_days,<br/>repetitions, lapses, themes")]
+    end
+    subgraph web["web (Vercel)"]
+        Q["lib/review-queue.ts<br/>due pool, scoped by user_id"]
+        UI["/review<br/>chess.js + react-chessboard"]
+        A["gradeReviewAction<br/>(session-derived user)"]
+    end
+    subgraph chess["packages/chess — pure"]
+        SEL["review.ts<br/>selectReviewSession"]
+        SRS["srs.ts<br/>SM-2"]
+    end
+
+    P -->|"due only"| Q
+    Q --> SEL
+    SEL -->|ordered session| UI
+    UI -->|outcome| A
+    A --> SRS
+    SRS -->|next due_at, ease,<br/>interval, lapses| P
+```
+
+**The schedule is SM-2**, as pure functions in `packages/chess/src/srs.ts`: a review is graded
+0–5, a pass advances `repetitions` and multiplies the interval by the ease, and a fail is a lapse
+that resets the interval and drops the ease against a 1.3 floor. Nothing about the schedule lives
+in a component or a server action — those only supply the current state and store what comes back.
+
+**The order is not the schedule.** Far more puzzles come due than fit in a session, so which due
+puzzles to show is a separate decision, made in `packages/chess/src/session-order.ts`:
+
+> Among puzzles SM-2 has made due, rank by a blend of **how overdue** the puzzle is relative to its
+> own interval and **how often the player fails its theme**, then cap how many puzzles one theme
+> may contribute to a session.
+
+The blend is deliberate in both directions: weighting purely by due date targets nothing the player
+is actually weak at, while ordering purely by failure rate would starve the themes they have
+mastered and defeat the retention SM-2 is there for. The per-theme cap keeps a session from
+becoming ten of the same motif, and yields when the backlog genuinely holds nothing else.
+
+The reasoning, the constants, and the five alternatives that lost are in
+[ADR 0004](./adr/0004-puzzle-review-ordering.md).
+
+**Authorisation** follows section 9 without exception: the queue query is scoped by `user_id`, and
+grading re-derives the user from the session and scopes the update by `user_id` too, so a puzzle id
+guessed by a client updates nothing.
+
+## 13. Security posture
 
 - **Sessions** are database-backed, in `httpOnly` + `Secure` + `SameSite=Lax` cookies. No JWT
   in local storage; a session can be revoked server-side.
@@ -624,7 +677,7 @@ tests. `apps/web/lib/openings.ts` does the reading; the page at `/openings` only
   browser.
 - **The worker exposes no inbound port.** It polls Postgres; nothing can call it.
 
-## 13. Open questions
+## 14. Open questions
 
 Carried from the idea note:
 
