@@ -41,4 +41,12 @@ export default tseslint.config(
       'no-console': 'off',
     },
   },
+  {
+    // Repo tooling is plain Node, so it needs the Node globals declared: unlike the TypeScript
+    // sources, nothing else here tells `no-undef` they exist.
+    files: ['**/scripts/**/*.mjs'],
+    languageOptions: {
+      globals: { console: 'readonly', fetch: 'readonly', process: 'readonly' },
+    },
+  },
 );

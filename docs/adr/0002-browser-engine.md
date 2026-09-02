@@ -90,7 +90,7 @@ and no weights to fetch separately.
 
 - **Maia or Lc0 in the browser.** Explicitly out of scope. They are a different problem —
   weights measured in tens of megabytes and a different runtime — and remain the open question
-  docs/architecture.md §12 records. Nothing here forecloses them: the engine sits behind the transport
+  docs/architecture.md §13 records. Nothing here forecloses them: the engine sits behind the transport
   seam in `apps/web/lib/engine/`, which takes any worker speaking UCI.
 
 ## Consequences

@@ -102,7 +102,7 @@ place that decides how strong a bot is.
 Below 1320 Stockfish cannot be weakened except by crippling its search, which produces the kind
 of blunder no 900-rated human makes — an engine playing a 12-ply-deep move and then hanging a
 queen for nothing. That is what Maia exists for. Bots under 1320 are out of scope until Lc0
-hosting is answered (docs/architecture.md §12).
+hosting is answered (docs/architecture.md §13).
 
 Search time per bot move is `BOT_MOVE_TIME_MS` (300 ms). It is a responsiveness knob, not a
 strength knob: at a capped Elo, more thinking time does not make the engine play better.

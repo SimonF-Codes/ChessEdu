@@ -12,7 +12,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest",
-    "test:run": "vitest run"
+    "test:run": "vitest run",
+    "sync:eco": "node scripts/sync-eco.mjs"
   },
   "dependencies": {
     "chess.js": "^1.0.0-beta.8"

@@ -183,7 +183,7 @@ scopes every query by the result, exactly like the server actions do.
 `history` is echoed back to the model as conversation, but it is **not** a source of facts. Every
 number in the next answer is re-read from `move_analysis` / `game_analysis` on this request. A
 client that edits an assistant turn to claim a different evaluation changes the prose it is
-replying to and nothing else. Persisting threads server-side is deferred — see section 12.
+replying to and nothing else. Persisting threads server-side is deferred — see section 13.
 
 ### 7.3 Response — an SSE stream
 
@@ -365,7 +365,7 @@ requests, because a silent cache miss is otherwise invisible until the bill arri
 - **Retrieval** over `corpus_chunks`. Until it lands the endpoint runs with zero chunks and emits no
   citations; the contract does not change when it arrives.
 - **The rate-limit mechanism.** The surface is fixed (`429` + `Retry-After`); where the counter lives
-  is open — see section 12.
+  is open — see section 13.
 
 ## 8. Analysis pipeline
 
@@ -554,11 +554,62 @@ Three rules hold this together:
   — the ownership chain in §5 is untouched by design. Saving played games would need a schema
   change in `packages/db` and would make them analysable like ingested ones; it is not built.
 
-The bot is Stockfish only. Human-like engines (Maia, Lc0) stay in §12 — different weights,
+The bot is Stockfish only. Human-like engines (Maia, Lc0) stay in §13 — different weights,
 different runtime, and the reason the Elo floor is 1320 rather than something a beginner would
 enjoy.
 
-## 11. Security posture
+## 11. Opening repertoire
+
+The repertoire is not a generic opening book. It is **the lines the player actually plays**,
+assembled from their own games, with mainline theory laid over the top so the point where they
+leave it is visible.
+
+```mermaid
+flowchart LR
+    G[("games + moves<br/>san, uci, fen_before")] --> TREE["buildRepertoire()<br/>tree per colour"]
+    ECO[("Lichess ECO data<br/>CC0, vendored")] --> BOOK["defaultBook()<br/>position-keyed index"]
+    BOOK --> TREE
+    BOOK --> DEV["findDeviation()<br/>first move off theory"]
+    G --> DEV
+    MA[("move_analysis<br/>Stockfish")] --> RANK["rankDeviations()<br/>frequency x cost"]
+    DEV --> RANK
+    TREE --> UI["/openings"]
+    RANK --> UI
+```
+
+**The tree.** One root per colour, since a repertoire is colour-specific. Each node is a
+position reached by a move the player made or faced, carrying how many of their games ran
+through it and how those games scored *from their perspective*. Lines are followed to
+`OPENING_MAX_PLY`, the same ply cap the phase model uses, so "opening" means one thing across
+the app.
+
+**The book.** ECO lines from the Lichess data set, expanded with `chess.js` into an index
+keyed by position rather than move order — so a transposition into a named line is recognised
+as that line. See [ADR 0003](./adr/0003-opening-theory-source.md) for why this source and not
+another. The book answers three questions and no others: *is this position theory*, *what is
+it called*, and *what does theory play from here*.
+
+**Deviation detection.** Walk a game's plies while each move is one of the book's known
+continuations. The first move that is not is the deviation, and it comes in two kinds:
+
+| Kind | Meaning | Taught? |
+|---|---|---|
+| `novelty` | The position had known continuations; the player chose something else | Yes — this is the lesson |
+| `out-of-book` | Theory simply ends here; there was nothing to leave | No |
+
+Deviations are then grouped by position across the whole history and ranked by
+`games x average centipawn loss`, so the habit that costs the most surfaces first — a small
+error repeated forty times outranks a disaster played once.
+
+**The punishment comes from the engine.** Nothing in `packages/chess` decides that a deviation
+was bad. `rankDeviations()` is handed the `move_analysis` row for the deviating ply and reports
+what Stockfish already concluded. The book is a source of names and alternatives; it is not a
+second evaluator. This is the coaching boundary of section 6 applied to opening theory.
+
+All of it lives in `packages/chess` (`book.ts`, `repertoire.ts`, `deviation.ts`) behind unit
+tests. `apps/web/lib/openings.ts` does the reading; the page at `/openings` only renders.
+
+## 12. Security posture
 
 - **Sessions** are database-backed, in `httpOnly` + `Secure` + `SameSite=Lax` cookies. No JWT
   in local storage; a session can be revoked server-side.
@@ -573,7 +624,7 @@ enjoy.
   browser.
 - **The worker exposes no inbound port.** It polls Postgres; nothing can call it.
 
-## 12. Open questions
+## 13. Open questions
 
 Carried from the idea note:
 

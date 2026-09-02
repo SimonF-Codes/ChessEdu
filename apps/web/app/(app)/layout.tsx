@@ -26,6 +26,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           >
             Dashboard
           </Link>
+          <Link href="/openings" className="text-neutral-600 hover:underline dark:text-neutral-400">
+            Openings
+          </Link>
           <Link href="/play" className="text-neutral-600 hover:underline dark:text-neutral-400">
             Play
           </Link>

@@ -4,3 +4,6 @@ dist
 coverage
 packages/db/migrations
 package-lock.json
+
+# Vendored CC0 data set, kept byte-identical to upstream. See docs/adr/0002.
+packages/chess/src/eco/data.ts
