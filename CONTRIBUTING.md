@@ -34,8 +34,14 @@ Write the failing test before the implementation.
 - **Domain rules go in `packages/chess`** and are unit tested there. If you find yourself
   deciding what a blunder is inside a React component or the worker loop, it belongs in
   `packages/chess` instead — that package is I/O-free precisely so the rules stay testable.
-- **Database and queue behaviour** is tested against real Postgres (`vitest --project db`),
-  never a mock. `SKIP LOCKED` semantics cannot be faked.
+- **Database and queue behaviour** is tested against real Postgres (`npm run test:db`), never a
+  mock. `SKIP LOCKED` semantics cannot be faked.
+
+  Name such a file `*.db.test.ts`. That suffix puts it in the `db` project, which runs one file
+  at a time against the single shared database. These suites reset the tables they own, and
+  running two at once let one truncate `user` while another was inserting rows referencing it —
+  a failure that appeared or vanished depending on interleaving. Without `TEST_DATABASE_URL`
+  the project skips entirely, so the everyday loop stays dependency-free.
 - **Server actions** are tested by calling them directly with a stubbed session.
 - **One Playwright smoke test** covers sign-in through to the dashboard. Keep it thin;
   everything else belongs a layer down.
@@ -62,6 +68,8 @@ npm run dev:worker       # ingest + analysis worker
 
 npm test                 # vitest, watch
 npm run test:run         # vitest, single pass (what CI runs)
+npm run test:unit        # the pure suites only — no database needed
+npm run test:db          # the Postgres-backed suites; needs TEST_DATABASE_URL
 npm run typecheck
 npm run lint
 
