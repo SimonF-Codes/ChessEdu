@@ -7,6 +7,7 @@ import {
   evaluateChallenge,
   generateLinkNonce,
   profileProvesOwnership,
+  reverificationNeeded,
 } from './link';
 
 const NONCE = `${NONCE_PREFIX}7f3a91c2e5d40b16`;
@@ -118,5 +119,86 @@ describe('evaluateChallenge', () => {
       now: new Date(createdAt.getTime() + NONCE_TTL_MS * 10),
     });
     expect(result.ok).toBe(false);
+  });
+});
+
+describe('reverificationNeeded', () => {
+  const verifiedAt = new Date('2026-01-01T00:00:00Z');
+  const base = {
+    storedPlatformUserId: '42',
+    currentPlatformUserId: '42',
+    verifiedAt,
+    lastSyncedAt: new Date('2026-08-01T00:00:00Z'),
+    now: new Date('2026-09-02T00:00:00Z'),
+  };
+
+  it('lets a healthy, recently synced link through', () => {
+    expect(reverificationNeeded(base)).toBeNull();
+  });
+
+  it('revokes when the player id behind the username has changed', () => {
+    expect(reverificationNeeded({ ...base, currentPlatformUserId: '99' })).toBe('renamed');
+  });
+
+  it('treats a changed player id as revoked even if the link was proved yesterday', () => {
+    expect(
+      reverificationNeeded({
+        ...base,
+        currentPlatformUserId: '99',
+        verifiedAt: new Date('2026-09-01T00:00:00Z'),
+        lastSyncedAt: new Date('2026-09-01T00:00:00Z'),
+      }),
+    ).toBe('renamed');
+  });
+
+  it('expires a link that has not synced for over a year', () => {
+    expect(
+      reverificationNeeded({ ...base, lastSyncedAt: new Date('2025-08-01T00:00:00Z') }),
+    ).toBe('stale');
+  });
+
+  it('measures staleness from the proof when the link has never synced', () => {
+    expect(
+      reverificationNeeded({
+        ...base,
+        verifiedAt: new Date('2025-01-01T00:00:00Z'),
+        lastSyncedAt: null,
+      }),
+    ).toBe('stale');
+  });
+
+  it('does not expire a never-synced link that was only just proved', () => {
+    expect(
+      reverificationNeeded({
+        ...base,
+        verifiedAt: new Date('2026-09-01T00:00:00Z'),
+        lastSyncedAt: null,
+      }),
+    ).toBeNull();
+  });
+
+  it('reports a rename rather than staleness when both are true', () => {
+    expect(
+      reverificationNeeded({
+        ...base,
+        currentPlatformUserId: '99',
+        lastSyncedAt: new Date('2024-01-01T00:00:00Z'),
+      }),
+    ).toBe('renamed');
+  });
+
+  it('does not treat a link predating the check as renamed', () => {
+    // No stored id means nothing to compare, not a mismatch.
+    expect(reverificationNeeded({ ...base, storedPlatformUserId: null })).toBeNull();
+  });
+
+  it('compares ids as strings, so numeric formatting cannot cause a false revoke', () => {
+    expect(
+      reverificationNeeded({ ...base, storedPlatformUserId: '42', currentPlatformUserId: '42' }),
+    ).toBeNull();
+  });
+
+  it('revokes a link with no verification at all', () => {
+    expect(reverificationNeeded({ ...base, verifiedAt: null })).toBe('unverified');
   });
 });

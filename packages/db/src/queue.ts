@@ -9,7 +9,21 @@ import type { Job } from './schema';
  * disjoint rows without coordination, which is all this project needs — see ADR 0001.
  */
 
-export type JobKind = 'ingest' | 'analyze' | 'embed' | 'puzzle_gen';
+/**
+ * The kinds that can be enqueued: exactly the kinds the worker has a handler for.
+ *
+ * This is deliberately narrower than the `job_kind` column, which also carries `embed` and
+ * `puzzle_gen`. `embed` is reserved for the reference corpus, which is not built yet.
+ * `puzzle_gen` is vestigial — puzzles turned out to be derived inline while a game is analysed
+ * (`apps/worker/src/handlers/analyze.ts`), so nothing ever enqueues one.
+ *
+ * Both stay in the database enum because Postgres cannot drop a value from one without
+ * recreating the type, and neither does any harm there. Keeping them out of *this* type is what
+ * matters: it makes enqueueing a job no worker can run a compile error rather than a job that
+ * retries three times and lands in `failed`. Reading is unaffected — `Job['kind']` is still the
+ * full enum, so a legacy row is handled gracefully rather than being unrepresentable.
+ */
+export type JobKind = 'ingest' | 'analyze';
 
 export const BASE_RETRY_MS = 30_000;
 export const MAX_RETRY_MS = 30 * 60 * 1000;

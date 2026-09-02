@@ -60,9 +60,41 @@ event; `verifiedAt` is stored, and the nonce is not re-checked on later syncs.
 
 ## Re-verification
 
-The link is re-proved if the username changes (Chess.com allows renames) or if the account has
-not synced for over a year. Both are cheap to detect: `/pub/player/{username}` returns a stable
-`player_id`, so a rename is a `player_id` that no longer matches the stored one.
+A proof of ownership goes stale. Two things invalidate it, and the worker checks both at the top
+of every sync, before it fetches a single archive.
+
+**The account behind the username changed.** Chess.com usernames can be released and reclaimed,
+so `jrfx99` today need not be `jrfx99` next year. `player_id` is the stable identity; the
+username is not. If the `player_id` at that username no longer matches the one recorded when the
+link was proved, the link points at a different account: it is revoked at once, `verifiedAt` is
+cleared, and nothing is ingested.
+
+This is the case that matters. Ingesting under a stale link would attribute a stranger's games
+to the user, and every number downstream would quietly be about someone else.
+
+**The proof is simply old.** A link last synced over a year ago is re-proved as hygiene, whether
+or not anything looks wrong. This one is not urgent — the games already stored are still the
+user's, so they are kept and only further ingest pauses.
+
+```mermaid
+flowchart TD
+    S["ingest job starts"] --> P["GET /pub/player/{username}"]
+    P --> M{"player_id matches<br/>the stored one?"}
+    M -->|no| R["revoke — clear verifiedAt,<br/>ingest nothing"]
+    M -->|yes| A{"last synced<br/>over a year ago?"}
+    A -->|yes| E["expire — clear verifiedAt,<br/>keep existing games"]
+    A -->|no| G["sync the archives"]
+    R --> U["user re-proves with a fresh nonce"]
+    E --> U
+```
+
+The rules are pure functions in `packages/chess/src/link.ts` (`reverificationNeeded`), tested in
+`link.test.ts`. The worker applies them at the top of `apps/worker/src/handlers/ingest.ts`, and
+the accounts page shows a link that needs re-proving.
+
+**A link with no stored `platformUserId`** predates this check. It is not treated as a mismatch —
+there is nothing to compare against — and the id is recorded on the next successful sync so the
+check works from then on.
 
 ## Ingest, and being a good API citizen
 

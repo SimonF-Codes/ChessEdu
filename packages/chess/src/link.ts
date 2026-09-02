@@ -107,3 +107,64 @@ export function challengeFailureMessage(reason: ChallengeFailure): string {
       return 'We could not find the code on your Chess.com profile yet. Save your profile, give it a moment, and check again.';
   }
 }
+
+/**
+ * A proof of ownership goes stale. See "Re-verification" in docs/chess-com-linking.md.
+ */
+
+/** How long a proof stands before it is re-taken as hygiene. */
+export const REVERIFY_AFTER_MS = 365 * 24 * 60 * 60 * 1000;
+
+export type ReverificationReason =
+  /** No proof on record at all. */
+  | 'unverified'
+  /** The username now resolves to a different Chess.com account. */
+  | 'renamed'
+  /** The proof stands but is over a year old. */
+  | 'stale';
+
+export interface ReverificationInput {
+  /** `player_id` recorded when the link was proved. Null for links predating this check. */
+  storedPlatformUserId: string | null;
+  /** `player_id` the username resolves to right now. */
+  currentPlatformUserId: string;
+  verifiedAt: Date | null;
+  lastSyncedAt: Date | null;
+  now: Date;
+}
+
+/**
+ * Why a link must be re-proved before it is used, or null if it may be used as is.
+ *
+ * Order is deliberate. A rename outranks staleness because the two have different
+ * consequences: a stale link is still the user's own account and its games are kept, whereas a
+ * renamed one points at a stranger and nothing under it can be trusted.
+ */
+export function reverificationNeeded(input: ReverificationInput): ReverificationReason | null {
+  if (!input.verifiedAt) return 'unverified';
+
+  // Null means the link predates the check: nothing to compare, so not a mismatch.
+  if (
+    input.storedPlatformUserId !== null &&
+    input.storedPlatformUserId !== input.currentPlatformUserId
+  ) {
+    return 'renamed';
+  }
+
+  // A link that has never synced is measured from the proof itself.
+  const since = (input.lastSyncedAt ?? input.verifiedAt).getTime();
+  if (input.now.getTime() - since > REVERIFY_AFTER_MS) return 'stale';
+
+  return null;
+}
+
+export function reverificationMessage(reason: ReverificationReason): string {
+  switch (reason) {
+    case 'unverified':
+      return 'This Chess.com account has not been verified. Link it again to prove it is yours.';
+    case 'renamed':
+      return 'That username now belongs to a different Chess.com account, so the link was removed. If you still own the account, link it again.';
+    case 'stale':
+      return 'It has been over a year since this link was proved. Link it again to keep syncing; your existing games are untouched.';
+  }
+}
