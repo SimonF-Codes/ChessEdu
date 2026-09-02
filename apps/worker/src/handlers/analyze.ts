@@ -5,6 +5,7 @@ import {
   type Color,
   type Evaluation,
   type Phase,
+  type PhaseSample,
   classifyMove,
   gameAccuracy,
   phaseOf,
@@ -18,17 +19,14 @@ import type { Engine, PositionAnalysis } from '../engine';
  *
  * Everything produced here is engine output or a pure function of it. No model is involved:
  * see the coaching boundary in docs/architecture.md.
+ *
+ * The per-phase totals written to `game_analysis.phase_breakdown` are the input to the
+ * strength model, so their shape is owned by `@chessedu/chess` (PhaseSample) rather than
+ * declared here. See section 9 of docs/architecture.md.
  */
 
 export interface AnalyzePayload {
   gameId: string;
-}
-
-export interface PhaseStats {
-  moves: number;
-  accuracy: number | null;
-  averageCentipawnLoss: number;
-  blunders: number;
 }
 
 /** Aggregate one side's per-move results into the numbers stored on the game. */
@@ -38,7 +36,7 @@ export function summarize(
   accuracy: number | null;
   acpl: number;
   counts: Record<Classification, number>;
-  byPhase: Record<Phase, PhaseStats>;
+  byPhase: Record<Phase, PhaseSample>;
 } {
   const counts: Record<Classification, number> = {
     blunder: 0,
@@ -67,10 +65,10 @@ export function summarize(
               ? 0
               : Math.round(inPhase.reduce((sum, e) => sum + e.centipawnLoss, 0) / inPhase.length),
           blunders: inPhase.filter((e) => e.classification === 'blunder').length,
-        } satisfies PhaseStats,
+        } satisfies PhaseSample,
       ];
     }),
-  ) as Record<Phase, PhaseStats>;
+  ) as Record<Phase, PhaseSample>;
 
   return {
     accuracy: gameAccuracy(entries.map((e) => e.winPercentLoss)),

@@ -1,8 +1,10 @@
-import type { Color, Evaluation } from '@chessedu/chess';
+import type { Color, Evaluation } from './classify';
 
 /**
- * Parsing the UCI protocol. Pure string handling, kept apart from the process plumbing in
- * engine.ts so the fiddly part is testable without spawning Stockfish.
+ * Parsing the UCI protocol. Pure string handling, kept apart from the plumbing that owns an
+ * engine — apps/worker/src/engine.ts spawning a process, apps/web/lib/engine driving a Web
+ * Worker — so the fiddly part is testable without an engine at either end, and so both ends
+ * agree on what a score means.
  */
 
 export interface EngineInfo {
@@ -68,4 +70,44 @@ export function toWhitePerspective(
 /** Side to move, read out of a FEN. */
 export function sideToMove(fen: string): Color {
   return fen.split(' ')[1] === 'b' ? 'b' : 'w';
+}
+
+/** A UCI option and the value to set it to. Values are strings on the wire, always. */
+export interface UciOption {
+  name: string;
+  value: string;
+}
+
+/**
+ * Format a `setoption` line. Stockfish ignores a malformed one in silence — no error, no
+ * acknowledgement, just an engine that quietly kept its old setting — so the formatting lives
+ * in one tested place rather than in a template literal at each call site.
+ */
+export function setOptionCommand(option: UciOption): string {
+  return `setoption name ${option.name} value ${option.value}`;
+}
+
+/** A move in the shape chess.js takes, from the four or five characters UCI uses. */
+export interface UciMove {
+  from: string;
+  to: string;
+  /** Present only on a promotion. */
+  promotion?: string;
+}
+
+const UCI_MOVE = /^([a-h][1-8])([a-h][1-8])([qrbn])?$/;
+
+/**
+ * Read a move off the wire.
+ *
+ * Returns null rather than throwing on anything unrecognised — `(none)`, `0000`, a truncated
+ * line — because the caller's answer is the same either way: do not play it.
+ */
+export function parseUciMove(uci: string): UciMove | null {
+  const match = UCI_MOVE.exec(uci.trim());
+  if (!match) return null;
+
+  const [, from, to, promotion] = match;
+  if (!from || !to) return null;
+  return promotion ? { from, to, promotion } : { from, to };
 }
