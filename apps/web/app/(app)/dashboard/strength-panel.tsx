@@ -11,7 +11,7 @@ import {
  * The per-phase strength model, rendered.
  *
  * Every number on this panel comes from `game_analysis`, which is Stockfish output — see
- * section 8 of docs/architecture.md. This file formats; it never decides.
+ * section 9 of docs/architecture.md. This file formats; it never decides.
  */
 
 const PHASE_LABELS: Record<Phase, string> = {

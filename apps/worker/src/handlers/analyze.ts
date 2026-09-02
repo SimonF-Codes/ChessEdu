@@ -22,7 +22,7 @@ import type { Engine, PositionAnalysis } from '../engine';
  *
  * The per-phase totals written to `game_analysis.phase_breakdown` are the input to the
  * strength model, so their shape is owned by `@chessedu/chess` (PhaseSample) rather than
- * declared here. See section 8 of docs/architecture.md.
+ * declared here. See section 9 of docs/architecture.md.
  */
 
 export interface AnalyzePayload {

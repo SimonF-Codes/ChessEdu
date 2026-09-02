@@ -15,7 +15,7 @@ import { type Database, schema } from '@chessedu/db';
  *
  * The model itself lives in `@chessedu/chess`; this file only fetches the rows and narrows each
  * game to the side the user played. Nothing here computes a chess judgement, and nothing here
- * asks a model for a number — see section 8 of docs/architecture.md.
+ * asks a model for a number — see section 9 of docs/architecture.md.
  */
 
 /** Games listed under the profile. Enough to recognise the run of form, not a full archive. */

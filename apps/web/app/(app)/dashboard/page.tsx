@@ -14,7 +14,7 @@ import { StrengthPanel } from './strength-panel';
  * the point of the page.
  *
  * Every figure shown is Stockfish output read out of `game_analysis` — see the coaching
- * boundary in section 6 of docs/architecture.md, and the model in section 8.
+ * boundary in section 6 of docs/architecture.md, and the model in section 9.
  */
 
 const RESULT_LABELS: Record<'win' | 'loss' | 'draw', string> = {

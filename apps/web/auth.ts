@@ -9,7 +9,7 @@ import Google from 'next-auth/providers/google';
  * Sessions are stored in the database rather than signed into a JWT, so signing a user out
  * everywhere is a delete rather than a wait for expiry. The cost is that sessions cannot be
  * validated in edge middleware; authorisation therefore happens in server components and
- * server actions instead. See docs/architecture.md, section 9.
+ * server actions instead. See docs/architecture.md, section 10.
  */
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: DrizzleAdapter(db(), {

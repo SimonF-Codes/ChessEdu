@@ -3,7 +3,7 @@ import type { Phase } from './phase';
 
 /**
  * The per-phase strength model: how well a player actually plays each phase, accumulated over
- * every analysed game. See section 8 of docs/architecture.md.
+ * every analysed game. See section 9 of docs/architecture.md.
  *
  * Every number here is engine output or a pure function of engine output. Nothing in this file
  * may be produced, rounded or ranked by a language model — the engine evaluates, the model only
