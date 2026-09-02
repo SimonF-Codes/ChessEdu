@@ -90,7 +90,8 @@ chessedu/
 ├── packages/
 │   ├── db/           Drizzle schema, migrations, client, job queue. The single schema owner.
 │   ├── chess/        Pure domain logic: PGN parse, phase split, move classification,
-│   │                 accuracy math, link-nonce rules. No I/O, so trivially testable.
+│   │                 accuracy math, opening book + repertoire + deviation detection,
+│   │                 link-nonce rules. No I/O, so trivially testable.
 │   └── chesscom/     The Chess.com API client. Shared, because the web app reads profiles to
 │                     verify a link and the worker reads archives to ingest games.
 ├── docs/             Architecture, ADRs, runbooks.
@@ -169,7 +170,58 @@ Ingest is **serial and conditional**: Chess.com rate-limits parallel requests an
 `If-Modified-Since`, so re-syncing an unchanged month costs a single 304. See
 [chess-com-linking.md](./chess-com-linking.md).
 
-## 8. Security posture
+## 8. Opening repertoire
+
+The repertoire is not a generic opening book. It is **the lines the player actually plays**,
+assembled from their own games, with mainline theory laid over the top so the point where they
+leave it is visible.
+
+```mermaid
+flowchart LR
+    G[("games + moves<br/>san, uci, fen_before")] --> TREE["buildRepertoire()<br/>tree per colour"]
+    ECO[("Lichess ECO data<br/>CC0, vendored")] --> BOOK["defaultBook()<br/>position-keyed index"]
+    BOOK --> TREE
+    BOOK --> DEV["findDeviation()<br/>first move off theory"]
+    G --> DEV
+    MA[("move_analysis<br/>Stockfish")] --> RANK["rankDeviations()<br/>frequency x cost"]
+    DEV --> RANK
+    TREE --> UI["/openings"]
+    RANK --> UI
+```
+
+**The tree.** One root per colour, since a repertoire is colour-specific. Each node is a
+position reached by a move the player made or faced, carrying how many of their games ran
+through it and how those games scored *from their perspective*. Lines are followed to
+`OPENING_MAX_PLY`, the same ply cap the phase model uses, so "opening" means one thing across
+the app.
+
+**The book.** ECO lines from the Lichess data set, expanded with `chess.js` into an index
+keyed by position rather than move order — so a transposition into a named line is recognised
+as that line. See [ADR 0002](./adr/0002-opening-theory-source.md) for why this source and not
+another. The book answers three questions and no others: *is this position theory*, *what is
+it called*, and *what does theory play from here*.
+
+**Deviation detection.** Walk a game's plies while each move is one of the book's known
+continuations. The first move that is not is the deviation, and it comes in two kinds:
+
+| Kind | Meaning | Taught? |
+|---|---|---|
+| `novelty` | The position had known continuations; the player chose something else | Yes — this is the lesson |
+| `out-of-book` | Theory simply ends here; there was nothing to leave | No |
+
+Deviations are then grouped by position across the whole history and ranked by
+`games x average centipawn loss`, so the habit that costs the most surfaces first — a small
+error repeated forty times outranks a disaster played once.
+
+**The punishment comes from the engine.** Nothing in `packages/chess` decides that a deviation
+was bad. `rankDeviations()` is handed the `move_analysis` row for the deviating ply and reports
+what Stockfish already concluded. The book is a source of names and alternatives; it is not a
+second evaluator. This is the coaching boundary of section 6 applied to opening theory.
+
+All of it lives in `packages/chess` (`book.ts`, `repertoire.ts`, `deviation.ts`) behind unit
+tests. `apps/web/lib/openings.ts` does the reading; the page at `/openings` only renders.
+
+## 9. Security posture
 
 - **Sessions** are database-backed, in `httpOnly` + `Secure` + `SameSite=Lax` cookies. No JWT
   in local storage; a session can be revoked server-side.
@@ -184,9 +236,15 @@ Ingest is **serial and conditional**: Chess.com rate-limits parallel requests an
   browser.
 - **The worker exposes no inbound port.** It polls Postgres; nothing can call it.
 
-## 9. Open questions carried from the idea note
+## 10. Open questions carried from the idea note
 
 - Lichess as a second ingest source. The `platform` column exists for it; nothing else does.
-- Reference-literature licensing. Bootstrap on public-domain classics only.
+- Reference-literature licensing. Bootstrap on public-domain classics only. **Partly settled:**
+  the *structural* opening theory source is decided — CC0 ECO data, see
+  [ADR 0002](./adr/0002-opening-theory-source.md). What is still open is prose literature for
+  `corpus_docs`, where anything past public domain needs its own licence decision per document.
+- Move-frequency and result data for theory, so the book can say which of two theory moves is
+  actually played. The Lichess opening explorer is the obvious source and the reason ADR 0002
+  would be revisited; it needs a Postgres cache first, because `packages/chess` stays I/O-free.
 - Maia/Lc0 bot hosting is heavier than Stockfish — likely a separate Fly machine running a
   CPU Lc0 build with small nets. Not scaffolded yet.
