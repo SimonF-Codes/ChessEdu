@@ -704,7 +704,7 @@ those numbers and asks only for the idea behind them. The model is never sent a 
 without its evaluation, and never asked which move was better. `parseCommentary()` then drops
 any citation id the model did not receive, so a fabricated source cannot reach the page.
 
-### Corpus retrieval — a provisional interface
+### Corpus retrieval
 
 Citations come from `corpus_chunks`. The coach does **not** own the corpus, the embeddings, or
 the pgvector query: it depends on a single injected function.
@@ -714,11 +714,46 @@ type RetrieveChunks = (query: string, options?: RetrieveOptions) => Promise<Corp
 ```
 
 `apps/web/lib/coach/retrieval.ts` is the only file that knows this shape; everything downstream
-consumes the `Citation` it maps chunks to. The default binding is `noCorpus`, which returns
-nothing, so the coach ships and runs uncited until the real retriever lands. **The signature in
-that file is provisional** — it is a placeholder for the corpus retrieval contract, and when
-that contract is settled it is documented here and `retrieval.ts` is adapted to it. Nothing
-else in the coach changes.
+consumes the `Citation` it maps chunks to.
+
+The retriever is real now. `packages/corpus` implements it, and `apps/web/lib/coach/corpus.ts`
+is the single binding point: it hands the coach `createRetriever(db, embedder)` when an
+embedding provider is configured, and `noCorpus` otherwise. The coach itself did not change,
+which is what the injected function was for.
+
+**Running uncited remains a supported state, not a degraded one.** With no provider configured
+the coach answers normally and emits zero citations — a game review is worth reading without
+reference literature attached, and blocking one on a vendor being set up is the worse trade.
+
+#### The corpus, end to end
+
+```mermaid
+flowchart LR
+    T["public-domain text<br/>+ licence"] --> C["chunkText()<br/>paragraph-aware, overlapping"]
+    C --> E["embedAll()<br/>batched, width-checked"]
+    E --> DB[("corpus_doc<br/>corpus_chunk · vector(1536)")]
+    Q["retrievalQuery()<br/>built from engine facts"] --> EQ["embed the query"]
+    EQ --> S["cosine distance over HNSW"]
+    DB --> S
+    S --> F["drop anything below MIN_SCORE"]
+    F --> CO["coach — cites source + locator"]
+```
+
+Three choices there are deliberate:
+
+- **The embedding width is fixed at 1536** by `corpus_chunk.embedding` and the HNSW index built
+  on it. A provider returning another width throws rather than being padded or truncated: a
+  silently reshaped vector ranks badly and looks fine, which is the worst combination.
+- **A weak match is dropped rather than cited.** Below `MIN_SCORE` a passage is nearer noise
+  than evidence, and the entire point of the corpus is that a citation can be checked.
+- **`license` is required on every document**, not optional. The corpus may hold only
+  public-domain or openly-licensed material, and an unrecorded licence is how that slips.
+
+**The embedding provider is deliberately not chosen in code.** Anthropic has no embeddings API,
+so this is the one place the project needs a second vendor; pinning it here would be making
+that decision on the reader's behalf. Any endpoint speaking the common
+`{ input, model } -> { data: [{ embedding }] }` shape works — see `EMBEDDING_*` in
+`.env.example`.
 
 ### Degradation
 
