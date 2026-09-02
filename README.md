@@ -65,6 +65,7 @@ The worker also needs a Stockfish binary; point `STOCKFISH_PATH` at it.
 
 ## Docs
 
+- [Status](docs/status.md) — what is built, what is not, and what "live" still needs
 - [Architecture](docs/architecture.md) — system shape, data model, the strength model, security posture, diagrams
 - [ADR 0001](docs/adr/0001-stack.md) — why this stack, and what lost
 - [Linking a Chess.com account](docs/chess-com-linking.md) — why a nonce, and how ingest behaves
@@ -73,8 +74,11 @@ The worker also needs a Stockfish binary; point `STOCKFISH_PATH` at it.
 
 ## Status
 
-Scaffold, and it builds and runs. In place: Google sign-in, verified Chess.com account linking,
-the ingest and analysis pipeline, the job queue, the schema, and CI/CD.
+Feature-complete against the original idea note, and green: Google sign-in, verified Chess.com
+linking, ingest, engine analysis, the per-phase strength model, puzzle review, the opening
+repertoire, the review coach, browser play against Stockfish, and the reference corpus.
 
-Not built yet: the coaching UI, the repertoire view, puzzle review, the reference-corpus
-ingest, and the bots. The schema and the queue have a place for each.
+**Not deployed.** No Neon database, no Google OAuth client, no deploy secrets — so the deploy
+workflows fail on every push, which is expected rather than broken. No real Chess.com account
+has ever been synced either, so everything above is verified against fixtures and a CI
+database. See [docs/status.md](docs/status.md) for what live actually needs.
