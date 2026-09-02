@@ -169,7 +169,122 @@ Ingest is **serial and conditional**: Chess.com rate-limits parallel requests an
 `If-Modified-Since`, so re-syncing an unchanged month costs a single 304. See
 [chess-com-linking.md](./chess-com-linking.md).
 
-## 8. Security posture
+## 8. The per-phase strength model
+
+One rating hides where a player is actually losing games. The strength model keeps the three
+phases apart, because the coaching, the puzzle mix and the practice opponents all want a
+different answer for the opening than for the endgame.
+
+**Every number in it is engine output or a pure function of engine output.** No model reads,
+writes, ranks or rounds any of it — see the coaching boundary in section 6. The LLM is handed
+the finished profile as fact when it explains what to work on.
+
+### Where the numbers come from
+
+```mermaid
+flowchart LR
+    MA[("move_analysis<br/>one row per ply<br/>phase + winPercentLoss")]
+    GA[("game_analysis.phase_breakdown<br/>jsonb, per side, per phase")]
+    PROF["StrengthProfile<br/>packages/chess/src/strength.ts"]
+    UI["Dashboard"]
+    PLAY["chessedu-play<br/>bots + drills"]
+    COACH["Coach prompt<br/>(given facts)"]
+
+    MA -->|"worker: summarize()"| GA
+    GA -->|"buildStrengthProfile()"| PROF
+    PROF --> UI
+    PROF --> PLAY
+    PROF --> COACH
+```
+
+The worker aggregates each analysed game once, into `game_analysis.phase_breakdown`. Readers
+never touch `move_analysis` to build a profile: a profile over 500 games is 500 rows, not
+40 000 plies.
+
+### The persisted per-game shape
+
+`game_analysis.phase_breakdown` is jsonb holding a `GamePhaseBreakdown`:
+
+```ts
+type Phase = 'opening' | 'middlegame' | 'endgame';
+
+interface PhaseSample {
+  moves: number;                   // plies this side played in the phase
+  accuracy: number | null;         // 0..100, harmonic mean; null when moves === 0
+  averageCentipawnLoss: number;    // integer, 0 when moves === 0
+  blunders: number;                // moves classified 'blunder'
+}
+
+type PhaseBreakdown = Record<Phase, PhaseSample>;      // all three keys always present
+interface GamePhaseBreakdown { white: PhaseBreakdown; black: PhaseBreakdown }
+```
+
+Both sides are stored, not just the user's: the same game may later be read from the
+opponent's side, and re-deriving it would mean re-running the engine.
+
+### The aggregated shape
+
+`buildStrengthProfile(breakdowns)` folds one `PhaseBreakdown` per game — the user's side of
+each — into the profile that the rest of the system consumes:
+
+```ts
+interface PhaseStrength extends PhaseSample {
+  phase: Phase;
+  games: number;                   // games that reached this phase at all
+  blundersPerHundredMoves: number;
+  /** Accuracy points behind this player's own best rated phase. 0 for that phase. */
+  deficit: number | null;
+  /** False until MIN_MOVES_PER_PHASE plies have accumulated; the numbers are noise below it. */
+  rated: boolean;
+}
+
+interface StrengthProfile {
+  games: number;                   // games folded in
+  moves: number;                   // plies across all phases
+  phases: Record<Phase, PhaseStrength>;
+  focus: Phase | null;             // weakest rated phase; null when nothing is rated yet
+  strongest: Phase | null;
+}
+```
+
+Three rules make this safe to consume:
+
+- **Accuracy recombines exactly.** Per-game accuracy is a harmonic mean, so the mean over
+  several games is `Σmoves / Σ(moves / accuracy)` — the same number a single pass over every
+  ply would produce, not an average of averages. Centipawn loss is move-weighted and therefore
+  carries each game's rounding; treat it as the secondary axis, not the headline.
+- **`rated` is the gate.** `MIN_MOVES_PER_PHASE` (150 plies) is the point below which a phase
+  is not reported as a strength or a weakness. `focus`, `strongest` and `deficit` only ever
+  consider rated phases, and every field is `null`-safe for a player who has just signed up.
+- **There is no invented rating.** The strength number *is* accuracy, on the Lichess curve
+  already used per move (`packages/chess/src/classify.ts`). Nothing rescales it into a
+  fictional Elo.
+
+### Consuming it: practice weights
+
+`practiceWeights(profile)` turns the profile into a distribution over the phases that sums to
+1, in proportion to the accuracy each phase is still giving away (`100 - accuracy`). A phase
+that is not rated yet is given the mean weight of the rated ones, so a new player still gets
+practice everywhere rather than nowhere.
+
+**`chessedu-play` is the intended consumer:** it takes the weights to decide how often a drill
+or a bot game starts from an opening, a middlegame or an endgame position, and reads
+`phases[phase].accuracy` as the player's level in that phase. Three things keep it in step with
+the dashboard:
+
+- Import `phaseBreakdownFor`, `buildStrengthProfile` and `practiceWeights` from
+  `@chessedu/chess`; do not re-derive any of them from `game_analysis`. The recombination rule
+  above is easy to get subtly wrong, and a second implementation would drift.
+- Narrow each game to the side the user played (`phaseBreakdownFor(row.phaseBreakdown, userColor)`)
+  before folding. A null means the worker has not analysed that game yet — count it as pending,
+  never as a weakness.
+- Profile the same window the dashboard uses: the most recent `STRENGTH_WINDOW` (200) games,
+  most recent first. Older games describe a player who no longer exists.
+
+An opponent is picked from `phases[focus]`, not from the player's Chess.com rating: the point of
+splitting the phases was to stop one number standing in for three.
+
+## 9. Security posture
 
 - **Sessions** are database-backed, in `httpOnly` + `Secure` + `SameSite=Lax` cookies. No JWT
   in local storage; a session can be revoked server-side.
@@ -184,7 +299,7 @@ Ingest is **serial and conditional**: Chess.com rate-limits parallel requests an
   browser.
 - **The worker exposes no inbound port.** It polls Postgres; nothing can call it.
 
-## 9. Open questions carried from the idea note
+## 10. Open questions carried from the idea note
 
 - Lichess as a second ingest source. The `platform` column exists for it; nothing else does.
 - Reference-literature licensing. Bootstrap on public-domain classics only.
