@@ -34,7 +34,7 @@ export default async function LinkPage() {
               <div className="text-sm">
                 <span className="font-medium">{account.username}</span>
                 <span className="ml-2 text-neutral-500">
-                  {account.verifiedAt ? 'verified' : 'unverified'}
+                  {account.verifiedAt ? 'verified' : 'needs re-verifying'}
                   {account.lastSyncedAt
                     ? ` · synced ${account.lastSyncedAt.toLocaleDateString()}`
                     : ' · sync pending'}
@@ -52,6 +52,22 @@ export default async function LinkPage() {
       ) : (
         <LinkForm />
       )}
+
+      {/*
+        A link is revoked server-side when the username starts resolving to a different
+        Chess.com account, or when the proof passes a year — see docs/chess-com-linking.md.
+        Without this the row would read "needs re-verifying" with no way to act on it, because
+        the form above only shows when nothing is linked at all.
+      */}
+      {linked.some((account) => !account.verifiedAt) ? (
+        <div className="space-y-4 rounded-lg border border-amber-300 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950">
+          <p className="text-sm">
+            One of your links needs proving again. Syncing is paused until you do — the games
+            already pulled in are untouched.
+          </p>
+          <LinkForm />
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { and, eq } from 'drizzle-orm';
 
-import { normalizeGame } from '@chessedu/chess';
+import { normalizeGame, reverificationMessage, reverificationNeeded } from '@chessedu/chess';
 import type { ChessComClient } from '@chessedu/chesscom';
 import { type Database, enqueue, schema } from '@chessedu/db';
 
@@ -46,7 +46,38 @@ export async function runIngest(
     where: eq(schema.chessAccounts.id, payload.chessAccountId),
   });
   if (!account) throw new Error(`no chess account ${payload.chessAccountId}`);
-  if (!account.verifiedAt) throw new Error(`chess account ${account.id} is not verified`);
+
+  // The proof is checked before a single archive is fetched. Ingesting under a link whose
+  // username now belongs to someone else would attribute a stranger's games to this user.
+  // See "Re-verification" in docs/chess-com-linking.md.
+  const profile = await client.getProfile(account.username);
+  if (!profile) throw new Error(`chess.com no longer knows ${account.username}`);
+
+  const reason = reverificationNeeded({
+    storedPlatformUserId: account.platformUserId,
+    currentPlatformUserId: String(profile.player_id),
+    verifiedAt: account.verifiedAt,
+    lastSyncedAt: account.lastSyncedAt,
+    now: now(),
+  });
+
+  if (reason) {
+    // Clearing verifiedAt is what actually stops further syncing and prompts the user; the
+    // games already stored stay, since they were ingested under a proof that held at the time.
+    await db
+      .update(schema.chessAccounts)
+      .set({ verifiedAt: null })
+      .where(eq(schema.chessAccounts.id, account.id));
+    throw new Error(`${account.username}: ${reverificationMessage(reason)}`);
+  }
+
+  // Backfill the id for links proved before this check existed, so it works from now on.
+  if (account.platformUserId === null) {
+    await db
+      .update(schema.chessAccounts)
+      .set({ platformUserId: String(profile.player_id) })
+      .where(eq(schema.chessAccounts.id, account.id));
+  }
 
   const urls = await client.getArchiveUrls(account.username);
   let archivesFetched = 0;

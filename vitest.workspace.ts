@@ -30,7 +30,11 @@ export default defineWorkspace([
   {
     test: {
       name: 'db',
-      include: ['packages/*/src/**/*.db.test.ts', 'apps/*/lib/**/*.db.test.ts'],
+      include: [
+        'packages/*/src/**/*.db.test.ts',
+        'apps/*/src/**/*.db.test.ts',
+        'apps/*/lib/**/*.db.test.ts',
+      ],
       exclude: shared.exclude,
       // One database, one file at a time. See the note above.
       fileParallelism: false,
