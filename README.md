@@ -60,6 +60,7 @@ The worker also needs a Stockfish binary; point `STOCKFISH_PATH` at it.
 | `packages/db` | Drizzle schema, migrations, client, job queue. The single schema owner |
 | `packages/chess` | Pure domain logic — classification, phases, accuracy, the strength model, PGN, link rules |
 | `packages/chesscom` | Chess.com API client: serial, conditional, rate-limit aware |
+| `packages/corpus` | Reference literature: chunking, embedding, pgvector retrieval |
 | `docs/` | Architecture, ADRs, runbooks |
 
 ## Docs

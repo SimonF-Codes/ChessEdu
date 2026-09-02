@@ -3,6 +3,7 @@
 import { db } from '@chessedu/db';
 
 import { type MoveComment, annotateReview } from '../../../../../lib/coach';
+import { corpusRetriever } from '../../../../../lib/coach/corpus';
 import { anthropicModel, isCoachConfigured } from '../../../../../lib/coach/anthropic-model';
 import { loadGameReview } from '../../../../../lib/review-data';
 import { requireUser } from '../../../../../lib/session';
@@ -44,7 +45,12 @@ export async function explainGameAction(gameId: string): Promise<ExplainResult> 
   }
 
   try {
-    const commentary = await annotateReview({ review, model: anthropicModel() });
+    const commentary = await annotateReview({
+      review,
+      model: anthropicModel(),
+      // Falls back to no corpus when no embedding provider is configured.
+      retrieve: corpusRetriever(),
+    });
     return { ok: true, comments: commentary.comments };
   } catch (error) {
     console.error('[coach] explaining game failed:', error);

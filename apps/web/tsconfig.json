@@ -17,6 +17,7 @@
       "@chessedu/chess": ["../../packages/chess/src/index.ts"],
       "@chessedu/chess/browser": ["../../packages/chess/src/browser.ts"],
       "@chessedu/chess/game-review": ["../../packages/chess/src/game-review.ts"],
+      "@chessedu/corpus": ["../../packages/corpus/src/index.ts"],
       "@chessedu/chesscom": ["../../packages/chesscom/src/index.ts"],
       "@chessedu/db": ["../../packages/db/src/index.ts"]
     }
