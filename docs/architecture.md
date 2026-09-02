@@ -101,6 +101,12 @@ chessedu/
 blunder*, *when the endgame starts*, or *whether a link is verified* lives there behind a unit
 test, not inside a React component or a worker loop.
 
+It ships TypeScript source rather than a build, so an import is a bundling decision. The
+barrel (`@chessedu/chess`) reaches `link.ts`, which needs `node:crypto` and therefore cannot be
+bundled for the browser. **Client components import a subpath instead** —
+`@chessedu/chess/review` is the browser-safe entry the walkthrough UI uses. Adding a new
+browser-facing module means adding a matching entry to that package's `exports`.
+
 ## 5. Data model
 
 ```mermaid
@@ -169,7 +175,73 @@ Ingest is **serial and conditional**: Chess.com rate-limits parallel requests an
 `If-Modified-Since`, so re-syncing an unchanged month costs a single 304. See
 [chess-com-linking.md](./chess-com-linking.md).
 
-## 8. Security posture
+## 8. The review coach
+
+The dashboard lists games; the review coach is how you *study* one. `/games/{id}/review` walks
+a game ply by ply — board, evaluation, and an annotation for **every** move — and adds prose
+explanation on the handful of moves that actually decided it.
+
+### Two layers of annotation
+
+```mermaid
+flowchart LR
+    MA[("move_analysis<br/>game_analysis")] --> RV["buildGameReview()<br/>packages/chess/src/review.ts"]
+    RV --> DET["Deterministic annotation<br/>every ply"]
+    RV --> KM["selectKeyMoments()"]
+    KM --> FACT["Given facts<br/>lib/coach/facts.ts"]
+    RET["retrieveChunks()<br/>corpus, pgvector"] --> PR
+    FACT --> PR["Prompt<br/>lib/coach/prompt.ts"]
+    PR --> LLM["Anthropic API"]
+    LLM --> PARSE["parseCommentary()<br/>validates plies + citation ids"]
+    DET --> UI["Walkthrough UI"]
+    PARSE --> UI
+```
+
+**Layer one is deterministic and always present.** `buildGameReview` in `packages/chess` turns
+the stored moves and `move_analysis` rows into a `GameReview`: per-ply classification, the
+evaluation before and after, the engine's best move and principal variation rendered in SAN,
+the phase, and a one-line factual annotation ("Blunder. Eval +0.4 to -3.1, 28% of the win
+chance. Engine: 21...Rfe8."). It is a pure function of engine output, so the walkthrough is
+complete and correct with the LLM switched off, the API key absent, or the model failing.
+
+**Layer two is prose, and only on key moments.** `selectKeyMoments` ranks plies by win
+percentage given up, weighting critical swings and the coached player's own moves above the
+opponent's, and returns at most six. Those — never the whole game — are what the model is
+asked to explain. Anything the model returns for a ply outside that set is discarded.
+
+### The coaching boundary, mechanically
+
+Section 6 states the rule; this is where it is enforced. `momentFacts()` builds a fixed block
+of *given facts* per moment straight out of `move_analysis`, and the prompt hands the model
+those numbers and asks only for the idea behind them. The model is never sent a position
+without its evaluation, and never asked which move was better. `parseCommentary()` then drops
+any citation id the model did not receive, so a fabricated source cannot reach the page.
+
+### Corpus retrieval — a provisional interface
+
+Citations come from `corpus_chunks`. The coach does **not** own the corpus, the embeddings, or
+the pgvector query: it depends on a single injected function.
+
+```ts
+type RetrieveChunks = (query: string, options?: RetrieveOptions) => Promise<CorpusChunk[]>;
+```
+
+`apps/web/lib/coach/retrieval.ts` is the only file that knows this shape; everything downstream
+consumes the `Citation` it maps chunks to. The default binding is `noCorpus`, which returns
+nothing, so the coach ships and runs uncited until the real retriever lands. **The signature in
+that file is provisional** — it is a placeholder for the corpus retrieval contract, and when
+that contract is settled it is documented here and `retrieval.ts` is adapted to it. Nothing
+else in the coach changes.
+
+### Degradation
+
+Commentary is requested from the page by an explicit action, not on render, because it costs a
+model call. Every failure mode — no API key, model error, unparseable response, an unanalysed
+game — leaves the deterministic walkthrough intact and reports the shortfall inline. Nothing
+about the review is cached in Postgres yet; if the cost of re-explaining the same game becomes
+real, a `move_commentary` table is the obvious next step.
+
+## 9. Security posture
 
 - **Sessions** are database-backed, in `httpOnly` + `Secure` + `SameSite=Lax` cookies. No JWT
   in local storage; a session can be revoked server-side.
@@ -184,7 +256,7 @@ Ingest is **serial and conditional**: Chess.com rate-limits parallel requests an
   browser.
 - **The worker exposes no inbound port.** It polls Postgres; nothing can call it.
 
-## 9. Open questions carried from the idea note
+## 10. Open questions carried from the idea note
 
 - Lichess as a second ingest source. The `platform` column exists for it; nothing else does.
 - Reference-literature licensing. Bootstrap on public-domain classics only.

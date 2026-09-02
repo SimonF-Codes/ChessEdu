@@ -56,6 +56,9 @@ export default async function DashboardPage() {
               <th className="py-2 font-medium">Opponent</th>
               <th className="py-2 font-medium">Opening</th>
               <th className="py-2 font-medium">Result</th>
+              <th className="py-2">
+                <span className="sr-only">Review</span>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -69,6 +72,14 @@ export default async function DashboardPage() {
                 </td>
                 <td className="py-2 text-neutral-500">{game.eco ?? '—'}</td>
                 <td className="py-2">{game.userResult}</td>
+                <td className="py-2 text-right">
+                  <Link
+                    href={`/games/${game.id}/review`}
+                    className="text-neutral-500 hover:underline"
+                  >
+                    Review
+                  </Link>
+                </td>
               </tr>
             ))}
           </tbody>
