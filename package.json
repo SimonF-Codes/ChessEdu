@@ -22,7 +22,9 @@
     "format": "prettier --write .",
     "db:generate": "npm run generate --workspace @chessedu/db",
     "db:migrate": "npm run migrate --workspace @chessedu/db",
-    "db:studio": "npm run studio --workspace @chessedu/db"
+    "db:studio": "npm run studio --workspace @chessedu/db",
+    "test:unit": "vitest run --project unit",
+    "test:db": "vitest run --project db"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",

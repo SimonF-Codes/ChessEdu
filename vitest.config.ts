@@ -1,11 +1,12 @@
 import { defineConfig } from 'vitest/config';
 
+/**
+ * Which files run, and with what isolation, lives in vitest.workspace.ts — it splits the
+ * suites into `unit` (parallel, I/O-free) and `db` (one real Postgres, serial).
+ * This file carries only what is shared across both projects.
+ */
 export default defineConfig({
   test: {
-    // Integration suites that need Postgres opt in via their own project config; the default
-    // run stays fast and dependency-free so the test-first loop is cheap.
-    include: ['packages/*/src/**/*.test.ts', 'apps/*/src/**/*.test.ts', 'apps/*/lib/**/*.test.ts'],
-    exclude: ['**/node_modules/**', '**/dist/**', '**/.next/**', '**/e2e/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov'],
