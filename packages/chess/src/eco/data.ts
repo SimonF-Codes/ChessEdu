@@ -5,7 +5,7 @@
  *
  * Licence: CC0 1.0 Universal (public domain dedication). Upstream describes the data set
  * as a collection of facts and releases the curation under CC0, which is why this source
- * was chosen over the alternatives — see docs/adr/0002-opening-theory-source.md.
+ * was chosen over the alternatives — see docs/adr/0003-opening-theory-source.md.
  *
  * One line per named opening, tab separated as eco / name / pgn. 3810 lines,
  * parsed by parseEcoTsv in ../book.ts.

@@ -7,7 +7,7 @@ import { extractSanMoves } from './pgn';
  * Mainline opening theory: what a position is called, and what theory plays from it.
  *
  * The source is the CC0 ECO data set vendored in ./eco/data.ts — see
- * docs/adr/0002-opening-theory-source.md for why that one and not another. The book supplies
+ * docs/adr/0003-opening-theory-source.md for why that one and not another. The book supplies
  * names and continuations and nothing else. It never says a move is bad; it says a move is not
  * in it, and Stockfish says what that cost. That is the coaching boundary applied to openings.
  */

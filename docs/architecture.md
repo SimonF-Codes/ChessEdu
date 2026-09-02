@@ -197,7 +197,7 @@ the app.
 
 **The book.** ECO lines from the Lichess data set, expanded with `chess.js` into an index
 keyed by position rather than move order — so a transposition into a named line is recognised
-as that line. See [ADR 0002](./adr/0002-opening-theory-source.md) for why this source and not
+as that line. See [ADR 0003](./adr/0003-opening-theory-source.md) for why this source and not
 another. The book answers three questions and no others: *is this position theory*, *what is
 it called*, and *what does theory play from here*.
 
@@ -241,10 +241,10 @@ tests. `apps/web/lib/openings.ts` does the reading; the page at `/openings` only
 - Lichess as a second ingest source. The `platform` column exists for it; nothing else does.
 - Reference-literature licensing. Bootstrap on public-domain classics only. **Partly settled:**
   the *structural* opening theory source is decided — CC0 ECO data, see
-  [ADR 0002](./adr/0002-opening-theory-source.md). What is still open is prose literature for
+  [ADR 0003](./adr/0003-opening-theory-source.md). What is still open is prose literature for
   `corpus_docs`, where anything past public domain needs its own licence decision per document.
 - Move-frequency and result data for theory, so the book can say which of two theory moves is
-  actually played. The Lichess opening explorer is the obvious source and the reason ADR 0002
+  actually played. The Lichess opening explorer is the obvious source and the reason ADR 0003
   would be revisited; it needs a Postgres cache first, because `packages/chess` stays I/O-free.
 - Maia/Lc0 bot hosting is heavier than Stockfish — likely a separate Fly machine running a
   CPU Lc0 build with small nets. Not scaffolded yet.
