@@ -13,6 +13,7 @@
     "dev": "npm run dev --workspace @chessedu/web",
     "dev:worker": "npm run dev --workspace @chessedu/worker",
     "build": "npm run build --workspaces --if-present",
+    "engine:fetch": "node scripts/fetch-stockfish.mjs",
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",

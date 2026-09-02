@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseBestMove, parseInfoLine, toWhitePerspective } from './uci';
+import {
+  parseBestMove,
+  parseInfoLine,
+  parseUciMove,
+  setOptionCommand,
+  toWhitePerspective,
+} from './uci';
 
 describe('parseInfoLine', () => {
   const LINE =
@@ -85,5 +91,39 @@ describe('toWhitePerspective', () => {
 
   it('does not turn a zero into a negative zero', () => {
     expect(Object.is(toWhitePerspective({ scoreCp: 0, mateIn: null }, 'b').cp, -0)).toBe(false);
+  });
+});
+
+describe('parseUciMove', () => {
+  it('reads a plain move', () => {
+    expect(parseUciMove('e2e4')).toEqual({ from: 'e2', to: 'e4' });
+  });
+
+  it('reads a promotion', () => {
+    expect(parseUciMove('e7e8q')).toEqual({ from: 'e7', to: 'e8', promotion: 'q' });
+    expect(parseUciMove('b2b1n')).toEqual({ from: 'b2', to: 'b1', promotion: 'n' });
+  });
+
+  it('tolerates surrounding whitespace, because engine output is line-based', () => {
+    expect(parseUciMove(' g1f3 ')).toEqual({ from: 'g1', to: 'f3' });
+  });
+
+  it('refuses anything that is not a move, rather than making one up', () => {
+    expect(parseUciMove('(none)')).toBeNull();
+    expect(parseUciMove('0000')).toBeNull();
+    expect(parseUciMove('e2e')).toBeNull();
+    expect(parseUciMove('e2e9')).toBeNull();
+    expect(parseUciMove('j2j4')).toBeNull();
+    // A king is not a promotion piece.
+    expect(parseUciMove('e7e8k')).toBeNull();
+    expect(parseUciMove('')).toBeNull();
+  });
+});
+
+describe('setOptionCommand', () => {
+  it('formats a setoption line the way Stockfish expects it', () => {
+    expect(setOptionCommand({ name: 'UCI_Elo', value: '1700' })).toBe(
+      'setoption name UCI_Elo value 1700',
+    );
   });
 });

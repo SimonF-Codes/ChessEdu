@@ -22,7 +22,7 @@ Deployed as a **live website** with Google sign-in and a verified Chess.com acco
 | ORM | Drizzle | Typed schema-as-code, real SQL escape hatch, good migrations |
 | Job queue | Postgres `SELECT ... FOR UPDATE SKIP LOCKED` | Deep analysis is minutes long and cannot run in a serverless request. No Redis to operate |
 | Analysis worker | Long-running Node service on Fly.io driving Stockfish over UCI | Needs a persistent process, CPU, and a real filesystem for NNUE weights |
-| Browser engine | `stockfish.wasm` in a Web Worker | Instant hints and play without burning server CPU |
+| Browser engine | Stockfish 18 `lite`, **single-threaded** WASM, in a Web Worker | Instant hints and bot play without burning server CPU, and without the COOP/COEP headers a threaded build would need — see [ADR 0002](./adr/0002-browser-engine.md) |
 | Board UI | `chess.js` + `react-chessboard` | De-facto standard pair, well maintained |
 | Coaching LLM | Anthropic API (`claude-opus-5`), server-side | It explains; it never evaluates — see sections 6 and 7 |
 | Tests | Vitest, plus Playwright for one smoke E2E | Fast unit/integration loop, thin browser layer |
@@ -183,7 +183,7 @@ scopes every query by the result, exactly like the server actions do.
 `history` is echoed back to the model as conversation, but it is **not** a source of facts. Every
 number in the next answer is re-read from `move_analysis` / `game_analysis` on this request. A
 client that edits an assistant turn to claim a different evaluation changes the prose it is
-replying to and nothing else. Persisting threads server-side is deferred — see section 11.
+replying to and nothing else. Persisting threads server-side is deferred — see section 12.
 
 ### 7.3 Response — an SSE stream
 
@@ -365,7 +365,7 @@ requests, because a silent cache miss is otherwise invisible until the bill arri
 - **Retrieval** over `corpus_chunks`. Until it lands the endpoint runs with zero chunks and emits no
   citations; the contract does not change when it arrives.
 - **The rate-limit mechanism.** The surface is fixed (`429` + `Retry-After`); where the counter lives
-  is open — see section 11.
+  is open — see section 12.
 
 ## 8. Analysis pipeline
 
@@ -517,7 +517,48 @@ the dashboard:
 An opponent is picked from `phases[focus]`, not from the player's Chess.com rating: the point of
 splitting the phases was to stop one number standing in for three.
 
-## 10. Security posture
+## 10. Playing against the engine
+
+`/play` is the one place the engine runs client-side rather than on the worker. Nothing about a
+casual game is worth a network round trip, and interactive moves must never queue behind the
+multi-minute batch analysis on the single Fly machine.
+
+```mermaid
+sequenceDiagram
+    actor U as User
+    participant B as play-board (client)
+    participant G as chess.js
+    participant E as Stockfish worker
+
+    Note over B,E: on mount: load /engines/…, uci, isready
+    B->>E: setoption UCI_LimitStrength / UCI_Elo
+    U->>B: drag a piece
+    B->>G: move() — legality, and the new FEN
+    G-->>B: ok, or rejected (snap back)
+    B->>E: position fen … / go movetime 300
+    E-->>B: info … / bestmove e2e4
+    B->>G: apply the bot's move
+    B-->>U: board updates, or game over
+```
+
+Three rules hold this together:
+
+- **chess.js is the referee, not the engine.** Legality, check, stalemate, the fifty-move rule
+  and threefold repetition are all decided by chess.js on the client. Stockfish is asked for a
+  move and nothing else; a bot move is applied through the same `move()` call as a human one,
+  so an illegal one would be rejected rather than trusted.
+- **Strength is a pure function.** `UCI_Elo` comes from `packages/chess/src/bot.ts`, unit tested,
+  clamped to the 1320–3190 range Stockfish accepts. No component decides how strong a bot is.
+- **Nothing is persisted.** A play session lives in React state and dies with the tab. There is
+  no table, no server action and no job for it, so nothing here can reach a user's real history
+  — the ownership chain in §5 is untouched by design. Saving played games would need a schema
+  change in `packages/db` and would make them analysable like ingested ones; it is not built.
+
+The bot is Stockfish only. Human-like engines (Maia, Lc0) stay in §12 — different weights,
+different runtime, and the reason the Elo floor is 1320 rather than something a beginner would
+enjoy.
+
+## 11. Security posture
 
 - **Sessions** are database-backed, in `httpOnly` + `Secure` + `SameSite=Lax` cookies. No JWT
   in local storage; a session can be revoked server-side.
@@ -532,14 +573,16 @@ splitting the phases was to stop one number standing in for three.
   browser.
 - **The worker exposes no inbound port.** It polls Postgres; nothing can call it.
 
-## 11. Open questions
+## 12. Open questions
 
 Carried from the idea note:
 
 - Lichess as a second ingest source. The `platform` column exists for it; nothing else does.
 - Reference-literature licensing. Bootstrap on public-domain classics only.
 - Maia/Lc0 bot hosting is heavier than Stockfish — likely a separate Fly machine running a
-  CPU Lc0 build with small nets. Not scaffolded yet.
+  CPU Lc0 build with small nets. Not scaffolded yet. This is also what a sub-1320 bot needs:
+  Stockfish's `UCI_Elo` stops there, and weakening it further produces inhuman blunders
+  ([ADR 0002](./adr/0002-browser-engine.md)).
 
 Raised by the coaching endpoint (section 7):
 
