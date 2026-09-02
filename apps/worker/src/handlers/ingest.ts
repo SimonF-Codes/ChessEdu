@@ -38,7 +38,7 @@ export function isSettledMonth(
 export async function runIngest(
   context: { db: Database; client: ChessComClient; now?: () => Date },
   payload: IngestPayload,
-): Promise<{ archivesFetched: number; gamesAdded: number }> {
+): Promise<{ archivesFetched: number; gamesAdded: number; gamesSkipped: number }> {
   const { db, client } = context;
   const now = context.now ?? (() => new Date());
 
@@ -82,6 +82,7 @@ export async function runIngest(
   const urls = await client.getArchiveUrls(account.username);
   let archivesFetched = 0;
   let gamesAdded = 0;
+  let gamesSkipped = 0;
 
   for (const url of urls) {
     const period = parseArchiveUrl(url);
@@ -109,7 +110,21 @@ export async function runIngest(
       // Variants share the archive with standard chess; the analytics only cover chess.
       if (raw.rules !== 'chess') continue;
 
-      const game = normalizeGame(raw, account.username);
+      // One unparseable game must not cost the user their whole history. Before this, a single
+      // throw here failed the job, took its three retries and parked the account in `failed`
+      // with nothing ingested — so the rarest game in an archive decided whether any of it
+      // arrived. A skip is logged and counted instead.
+      let game: ReturnType<typeof normalizeGame>;
+      try {
+        game = normalizeGame(raw, account.username);
+      } catch (error) {
+        gamesSkipped += 1;
+        console.warn(
+          `[ingest] skipping ${raw.url}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        continue;
+      }
+
       const [inserted] = await db
         .insert(schema.games)
         .values({
@@ -195,5 +210,5 @@ export async function runIngest(
     .set({ lastSyncedAt: now() })
     .where(eq(schema.chessAccounts.id, account.id));
 
-  return { archivesFetched, gamesAdded };
+  return { archivesFetched, gamesAdded, gamesSkipped };
 }

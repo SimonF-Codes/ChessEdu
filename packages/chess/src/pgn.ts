@@ -138,6 +138,37 @@ export function extractSanMoves(pgn: string): string[] {
     .filter((token) => token.length > 0);
 }
 
+/**
+ * The board a game starts from, and the ply its first recorded move occupies.
+ *
+ * Most games start from the initial position, but Chess.com daily and themed games can begin
+ * from a set position: the PGN carries `[SetUp "1"]` with a `[FEN ...]` and the movetext picks
+ * up mid-game (`3... c6 4. f3 ...`). Replaying those from the initial position throws on the
+ * very first move.
+ *
+ * The ply offset matters as much as the board. A game resuming at move 3 with Black to play has
+ * its first recorded move at ply 6, and `phaseOf` reads ply to decide whether a position is
+ * still in the opening — numbering from 1 would file a middlegame under the opening.
+ */
+function startingPosition(headers: Record<string, string>): { board: Chess; firstPly: number } {
+  // A FEN header without SetUp describes the final position on some exports, not the first.
+  const fen = headers.SetUp === '1' ? headers.FEN : undefined;
+  if (!fen) return { board: new Chess(), firstPly: 1 };
+
+  try {
+    const board = new Chess(fen);
+    const parts = fen.split(/\s+/u);
+    const sideToMove = parts[1] ?? 'w';
+    const moveNumber = Number(parts[5] ?? '1');
+    if (!Number.isFinite(moveNumber) || moveNumber < 1) return { board, firstPly: 1 };
+    return { board, firstPly: (moveNumber - 1) * 2 + (sideToMove === 'b' ? 2 : 1) };
+  } catch {
+    // An unusable FEN is not worth losing the game over. The moves may still replay from the
+    // start; if they do not, the caller gets a clear error from the move itself.
+    return { board: new Chess(), firstPly: 1 };
+  }
+}
+
 export function normalizeGame(game: ChessComGame, username: string): NormalizedGame {
   const wanted = username.toLowerCase();
   const isWhite = game.white.username.toLowerCase() === wanted;
@@ -152,13 +183,13 @@ export function normalizeGame(game: ChessComGame, username: string): NormalizedG
   const clocks = extractClocks(game.pgn);
   const sanMoves = extractSanMoves(game.pgn);
 
-  const board = new Chess();
+  const { board, firstPly } = startingPosition(headers);
   const moves: NormalizedMove[] = [];
   for (const [index, san] of sanMoves.entries()) {
     const fenBefore = board.fen();
     const played = board.move(san);
     moves.push({
-      ply: index + 1,
+      ply: firstPly + index,
       color: played.color as Color,
       san: played.san,
       uci: `${played.from}${played.to}${played.promotion ?? ''}`,

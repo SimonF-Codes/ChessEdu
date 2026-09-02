@@ -137,3 +137,84 @@ describe('normalizeGame', () => {
     expect(() => normalizeGame(GAME, 'a-third-party')).toThrow(/did not play/i);
   });
 });
+
+describe('normalizeGame with a set-up position', () => {
+  // Chess.com daily and themed games can start from a given position: the PGN carries
+  // [SetUp "1"] + [FEN ...] and the movetext begins mid-game. Found against the live API —
+  // two of Hikaru's 2014 daily games are Richter-Veresov themed openings.
+  const SETUP_PGN = [
+    '[Event "Richter-Veresov Attack (Rated)"]',
+    '[Site "Chess.com"]',
+    '[White "AMFYOYO"]',
+    '[Black "Hikaru"]',
+    '[Result "0-1"]',
+    '[SetUp "1"]',
+    '[FEN "rnbqkb1r/ppp1pppp/5n2/3p2B1/3P4/2N5/PPP1PPPP/R2QKBNR b KQkq - 4 3"]',
+    '[ECO "D00"]',
+    '[TimeControl "1/259200"]',
+    '',
+    '3... c6 4. f3 Qb6 5. e4 dxe4 0-1',
+    '',
+  ].join('\n');
+
+  const SETUP_GAME: ChessComGame = {
+    url: 'https://www.chess.com/game/daily/86709136',
+    pgn: SETUP_PGN,
+    time_control: '1/259200',
+    time_class: 'daily',
+    rated: true,
+    rules: 'chess',
+    end_time: 1_395_628_369,
+    white: { username: 'AMFYOYO', rating: 1863, result: 'resigned' },
+    black: { username: 'Hikaru', rating: 2296, result: 'win' },
+  };
+
+  it('starts from the FEN rather than the initial position', () => {
+    const game = normalizeGame(SETUP_GAME, 'Hikaru');
+    expect(game.moves[0]!.fenBefore).toBe(
+      'rnbqkb1r/ppp1pppp/5n2/3p2B1/3P4/2N5/PPP1PPPP/R2QKBNR b KQkq - 4 3',
+    );
+  });
+
+  it('parses the moves that follow, which fail from the initial position', () => {
+    const { moves } = normalizeGame(SETUP_GAME, 'Hikaru');
+    expect(moves.map((m) => m.san)).toEqual(['c6', 'f3', 'Qb6', 'e4', 'dxe4']);
+  });
+
+  it('numbers plies from the real position in the game, not from one', () => {
+    // The FEN says move 3 with Black to play, so this is ply 6.
+    const { moves } = normalizeGame(SETUP_GAME, 'Hikaru');
+    expect(moves[0]!.ply).toBe(6);
+    expect(moves.map((m) => m.ply)).toEqual([6, 7, 8, 9, 10]);
+  });
+
+  it('gets the colours right for a game starting on Black', () => {
+    const { moves } = normalizeGame(SETUP_GAME, 'Hikaru');
+    expect(moves.map((m) => m.color)).toEqual(['b', 'w', 'b', 'w', 'b']);
+  });
+
+  it('still reads the result from the user perspective', () => {
+    expect(normalizeGame(SETUP_GAME, 'Hikaru').userResult).toBe('win');
+  });
+
+  it('ignores a FEN header when SetUp is not set, since the game began normally', () => {
+    const pgn = SETUP_PGN.replace('[SetUp "1"]\n', '').replace(
+      '3... c6 4. f3 Qb6 5. e4 dxe4 0-1',
+      '1. e4 e5 1-0',
+    );
+    const game = normalizeGame({ ...SETUP_GAME, pgn }, 'Hikaru');
+    expect(game.moves[0]!.fenBefore).toBe(
+      'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+    );
+    expect(game.moves[0]!.ply).toBe(1);
+  });
+
+  it('falls back to the initial position when the FEN is unusable', () => {
+    const pgn = SETUP_PGN.replace(
+      'rnbqkb1r/ppp1pppp/5n2/3p2B1/3P4/2N5/PPP1PPPP/R2QKBNR b KQkq - 4 3',
+      'not-a-fen',
+    ).replace('3... c6 4. f3 Qb6 5. e4 dxe4 0-1', '1. e4 e5 1-0');
+    const game = normalizeGame({ ...SETUP_GAME, pgn }, 'Hikaru');
+    expect(game.moves.map((m) => m.san)).toEqual(['e4', 'e5']);
+  });
+});
