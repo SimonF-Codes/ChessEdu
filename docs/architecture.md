@@ -205,7 +205,7 @@ that resets the interval and drops the ease against a 1.3 floor. Nothing about t
 in a component or a server action — those only supply the current state and store what comes back.
 
 **The order is not the schedule.** Far more puzzles come due than fit in a session, so which due
-puzzles to show is a separate decision, made in `packages/chess/src/review.ts`:
+puzzles to show is a separate decision, made in `packages/chess/src/session-order.ts`:
 
 > Among puzzles SM-2 has made due, rank by a blend of **how overdue** the puzzle is relative to its
 > own interval and **how often the player fails its theme**, then cap how many puzzles one theme
@@ -217,7 +217,7 @@ mastered and defeat the retention SM-2 is there for. The per-theme cap keeps a s
 becoming ten of the same motif, and yields when the backlog genuinely holds nothing else.
 
 The reasoning, the constants, and the five alternatives that lost are in
-[ADR 0002](./adr/0002-puzzle-review-ordering.md).
+[ADR 0004](./adr/0004-puzzle-review-ordering.md).
 
 **Authorisation** follows section 9 without exception: the queue query is scoped by `user_id`, and
 grading re-derives the user from the session and scopes the update by `user_id` too, so a puzzle id

@@ -19,7 +19,7 @@ import { type Database, schema } from '@chessedu/db';
  * the client (see the security posture in docs/architecture.md).
  *
  * The *policy* — which due puzzles a session shows, and in what order — is not here. It is pure,
- * lives in `packages/chess/src/review.ts`, and is explained in ADR 0002. This module's only job
+ * lives in `packages/chess/src/session-order.ts`, and is explained in ADR 0004. This module's only job
  * is to hand it a candidate pool.
  */
 

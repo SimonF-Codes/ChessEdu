@@ -8,7 +8,7 @@ import { type ReviewCard, ReviewSession } from './review-session';
 
 /**
  * The review queue, scoped to the signed-in user. Which puzzles appear and in what order is the
- * policy in packages/chess (ADR 0002); this page only supplies the session and the board.
+ * policy in packages/chess (ADR 0004); this page only supplies the session and the board.
  */
 export default async function ReviewPage() {
   const user = await requireUser();

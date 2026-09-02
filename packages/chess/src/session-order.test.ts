@@ -10,7 +10,7 @@ import {
   selectReviewSession,
   themeFailureRate,
   themeFailureRates,
-} from './review';
+} from './session-order';
 
 const NOW = new Date('2026-08-27T12:00:00.000Z');
 const DAY_MS = 24 * 60 * 60 * 1000;

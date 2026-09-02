@@ -1,4 +1,4 @@
-# ADR 0002: Puzzle review ordering — theme failure rate blended with overdue urgency
+# ADR 0004: Puzzle review ordering — theme failure rate blended with overdue urgency
 
 - **Status:** accepted
 - **Date:** 2026-08-27

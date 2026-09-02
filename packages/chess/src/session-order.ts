@@ -7,7 +7,7 @@
  *
  * The policy, in one line: among puzzles SM-2 has made due, rank by a blend of how overdue the
  * puzzle is *relative to its own interval* and how often the player fails its theme, then cap how
- * much of a session any one theme may take. See ADR 0002 for the alternatives that lost.
+ * much of a session any one theme may take. See ADR 0004 for the alternatives that lost.
  *
  * Pure, like the rest of this package: the caller supplies the candidate rows and `now`.
  */
@@ -43,7 +43,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /**
  * Reviews a puzzle has been through. SM-2 resets `repetitions` on a lapse, so this undercounts a
  * puzzle that has lapsed more than once and biases its theme's rate upward — towards the themes
- * this policy wants to surface anyway. ADR 0002 records why that is preferred to a review log.
+ * this policy wants to surface anyway. ADR 0004 records why that is preferred to a review log.
  */
 function attemptsOf(candidate: ReviewCandidate): number {
   return candidate.repetitions + candidate.lapses;

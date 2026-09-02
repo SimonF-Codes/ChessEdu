@@ -2,7 +2,7 @@
  * SM-2 spaced repetition, as pure functions.
  *
  * This module owns *when* a puzzle comes back. It does not own *which* of the due puzzles a
- * session shows — that is a separate decision, in review.ts, for the reasons in ADR 0002.
+ * session shows — that is a separate decision, in session-order.ts, for the reasons in ADR 0004.
  *
  * Nothing here reads a clock or a database: the caller passes the current state and `now`, and
  * gets the next state back. That is what makes the schedule testable at the boundaries that

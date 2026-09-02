@@ -13,7 +13,7 @@ import { type GradeReviewResult, gradeReviewAction } from './actions';
  *
  * The component keeps no opinion about scheduling: it reports what it saw — how many wrong moves,
  * whether the answer was revealed, how long the position took — and the server turns that into an
- * SM-2 grade. See ADR 0002 and packages/chess/src/srs.ts.
+ * SM-2 grade. See ADR 0004 and packages/chess/src/srs.ts.
  */
 
 /** Just enough of a puzzle to play it. The scheduling columns stay on the server. */
