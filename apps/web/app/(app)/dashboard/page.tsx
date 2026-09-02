@@ -94,6 +94,9 @@ export default async function DashboardPage() {
               <th className="py-2 font-medium">Opening</th>
               <th className="py-2 font-medium">Result</th>
               <th className="py-2 text-right font-medium">Accuracy</th>
+              <th className="py-2">
+                <span className="sr-only">Review</span>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -113,6 +116,14 @@ export default async function DashboardPage() {
                 <td className="py-2">{RESULT_LABELS[game.userResult]}</td>
                 <td className="py-2 text-right tabular-nums text-neutral-500">
                   {game.accuracy === null ? 'analysing' : `${game.accuracy.toFixed(1)}%`}
+                </td>
+                <td className="py-2 text-right">
+                  <Link
+                    href={`/games/${game.id}/review`}
+                    className="text-neutral-500 hover:underline"
+                  >
+                    Review
+                  </Link>
                 </td>
               </tr>
             ))}
