@@ -140,6 +140,54 @@ describe.skipIf(!connectionString)('ingest re-verification', () => {
     ).rejects.toThrow(/not been verified/i);
   });
 
+  it('skips an unparseable game instead of losing the whole archive', async () => {
+    const id = await makeAccount();
+    const good = {
+      url: 'https://www.chess.com/game/live/1',
+      pgn: ['[White "jrfx99"]', '[Black "opp"]', '[ECO "C50"]', '', '1. e4 e5 1-0', ''].join('\n'),
+      time_control: '180',
+      time_class: 'blitz',
+      rated: true,
+      rules: 'chess',
+      end_time: 1_785_000_000,
+      white: { username: 'jrfx99', rating: 1200, result: 'win' },
+      black: { username: 'opp', rating: 1200, result: 'resigned' },
+    };
+    // Same shape, but the movetext cannot be replayed from the initial position.
+    const bad = {
+      ...good,
+      url: 'https://www.chess.com/game/live/2',
+      pgn: ['[White "jrfx99"]', '[Black "opp"]', '', '1. Qh8 Qa1 1-0', ''].join('\n'),
+    };
+
+    const client = new ChessComClient({
+      contact: 'test@example.com',
+      minIntervalMs: 0,
+      sleep: () => Promise.resolve(),
+      fetchImpl: (async (url: string) => {
+        const body = url.endsWith('/archives')
+          ? { archives: ['https://api.chess.com/pub/player/jrfx99/games/2026/08'] }
+          : url.includes('/games/2026/08')
+            ? { games: [bad, good] }
+            : { username: 'jrfx99', player_id: 42 };
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }) as unknown as typeof fetch,
+    });
+
+    const result = await runIngest({ db, client }, { chessAccountId: id });
+
+    expect(result.gamesSkipped).toBe(1);
+    expect(result.gamesAdded).toBe(1);
+
+    // The good game that came *after* the bad one still landed.
+    const games = await db.select().from(schema.games);
+    expect(games).toHaveLength(1);
+    expect(games[0]!.url).toBe('https://www.chess.com/game/live/1');
+  });
+
   it('fails loudly when the username has vanished from Chess.com', async () => {
     const id = await makeAccount();
 

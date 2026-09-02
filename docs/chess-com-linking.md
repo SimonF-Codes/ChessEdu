@@ -119,6 +119,24 @@ Rules the client follows (`packages/chesscom/src/client.ts`, tested in `client.t
 - **Only the current and future months are re-fetched** once a past month has been seen with a
   stable ETag — historical months are immutable in practice.
 
+## What real archives actually contain
+
+Fixtures do not prepare you for a decade of somebody's games. Both of the following were found
+by running the parser over live archives rather than by reasoning about the format.
+
+**Not every game starts from the initial position.** Daily and themed games carry `[SetUp "1"]`
+with a `[FEN ...]`, and their movetext begins mid-game (`3... c6 4. f3 ...`). `normalizeGame`
+starts the board from that FEN and offsets the ply numbering to match — `phaseOf` reads ply, so
+numbering from 1 would file a middlegame under the opening.
+
+**One unparseable game must not cost the user their history.** A throw inside the ingest loop
+used to fail the whole job, spend its three retries and park the account in `failed` with
+nothing stored — letting the single strangest game in an archive decide whether any of it
+arrived. Parse failures are now skipped, logged, and counted in `gamesSkipped`.
+
+Variants (`chess960`, bughouse and the rest) are skipped before parsing: they share the archive
+with standard chess, and the analytics do not cover them.
+
 ## Why not scrape, and why not ask for a password
 
 Both were considered and rejected. Scraping breaks the terms of service and the markup;
