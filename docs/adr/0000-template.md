@@ -1,3 +1,7 @@
+---
+status: stable
+---
+
 # ADR NNNN: <title>
 
 - **Status:** proposed | accepted | superseded by ADR-NNNN

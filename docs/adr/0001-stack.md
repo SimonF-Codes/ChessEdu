@@ -1,3 +1,7 @@
+---
+status: stable
+---
+
 # ADR 0001: Next.js on Vercel, a Fly.io worker, and Postgres as the queue
 
 - **Status:** accepted

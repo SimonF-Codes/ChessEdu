@@ -1,3 +1,7 @@
+---
+status: stable
+---
+
 # ChessEdu — Architecture
 
 > Source of truth for how the system is put together. Change this **before** changing code

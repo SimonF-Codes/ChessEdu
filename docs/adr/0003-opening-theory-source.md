@@ -1,3 +1,7 @@
+---
+status: stable
+---
+
 # ADR 0003: The Lichess ECO data set as the source of mainline theory
 
 - **Status:** accepted
