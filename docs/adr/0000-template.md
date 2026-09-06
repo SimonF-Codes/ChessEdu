@@ -1,5 +1,5 @@
 ---
-status: stable
+status: draft
 ---
 
 # ADR NNNN: <title>
