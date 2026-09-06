@@ -1,3 +1,7 @@
+---
+status: stable
+---
+
 # Where the project stands
 
 Replaces `integration-plan.md`, which described six unmerged feature branches. All six are

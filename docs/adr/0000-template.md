@@ -1,3 +1,7 @@
+---
+status: draft
+---
+
 # ADR NNNN: <title>
 
 - **Status:** proposed | accepted | superseded by ADR-NNNN
