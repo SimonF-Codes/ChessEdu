@@ -1,3 +1,7 @@
+---
+status: stable
+---
+
 # ADR 0002: A single-threaded Stockfish in the browser, and no cross-origin isolation
 
 - **Status:** accepted

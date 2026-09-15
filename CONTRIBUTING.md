@@ -78,6 +78,19 @@ npm run db:migrate       # apply migrations
 npm run db:studio        # browse the database
 ```
 
+Anything needing `DATABASE_URL` reads it from the environment. Put it in a gitignored `.env` at
+the repo root and run the command through the helper:
+
+```bash
+npx tsx scripts/with-env.mts npm run db:migrate
+npx tsx scripts/with-env.mts npx vitest run --project db
+```
+
+The helper exists because a hosted connection string contains `&`, which a POSIX shell reads as
+a control operator — `set -a; . ./.env` silently truncates the value there and leaves you
+connecting to localhost. It parses the file and hands the result to the child process directly,
+which also keeps the credential off the command line.
+
 ## Conventions
 
 - **TypeScript strict**, including `noUncheckedIndexedAccess`. No `any` without a comment

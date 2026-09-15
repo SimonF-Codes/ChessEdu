@@ -1,3 +1,7 @@
+---
+status: stable
+---
+
 # Linking a Chess.com account
 
 ## The constraint

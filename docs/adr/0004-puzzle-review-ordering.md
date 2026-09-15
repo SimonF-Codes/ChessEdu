@@ -1,3 +1,7 @@
+---
+status: stable
+---
+
 # ADR 0004: Puzzle review ordering — theme failure rate blended with overdue urgency
 
 - **Status:** accepted

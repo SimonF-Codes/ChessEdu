@@ -1,3 +1,7 @@
+---
+status: stable
+---
+
 # The browser engine
 
 How Stockfish runs in the tab, why there are no COOP/COEP headers, and what to do if that ever
