@@ -532,15 +532,15 @@ sequenceDiagram
     actor U as User
     participant B as play-board (client)
     participant G as chess.js
-    participant E as Stockfish worker
+    participant P as move provider
 
-    Note over B,E: on mount: load /engines/…, uci, isready
-    B->>E: setoption UCI_LimitStrength / UCI_Elo
+    Note over B,P: on mount: create the provider, init()
+    B->>P: newGame(level)
     U->>B: drag a piece
     B->>G: move() — legality, and the new FEN
     G-->>B: ok, or rejected (snap back)
-    B->>E: position fen … / go movetime 300
-    E-->>B: info … / bestmove e2e4
+    B->>P: chooseMove(fen)
+    P-->>B: e2e4, or null when there is none
     B->>G: apply the bot's move
     B-->>U: board updates, or game over
 ```
@@ -548,19 +548,73 @@ sequenceDiagram
 Three rules hold this together:
 
 - **chess.js is the referee, not the engine.** Legality, check, stalemate, the fifty-move rule
-  and threefold repetition are all decided by chess.js on the client. Stockfish is asked for a
+  and threefold repetition are all decided by chess.js on the client. The provider is asked for a
   move and nothing else; a bot move is applied through the same `move()` call as a human one,
   so an illegal one would be rejected rather than trusted.
-- **Strength is a pure function.** `UCI_Elo` comes from `packages/chess/src/bot.ts`, unit tested,
-  clamped to the 1320–3190 range Stockfish accepts. No component decides how strong a bot is.
+- **Strength is a pure function.** The rungs come from `packages/chess/src/bot.ts`, unit tested.
+  No component decides how strong a bot is — and no component decides what a rung *means* to an
+  engine either; see §10.1.
 - **Nothing is persisted.** A play session lives in React state and dies with the tab. There is
   no table, no server action and no job for it, so nothing here can reach a user's real history
   — the ownership chain in §5 is untouched by design. Saving played games would need a schema
   change in `packages/db` and would make them analysable like ingested ones; it is not built.
 
-The bot is Stockfish only *for now*. Human-like engines below its 1320 floor are settled by [ADR 0005](./adr/0005-human-like-bots.md) — Maia v1 in the browser via ONNX Runtime Web. Different weights,
-different runtime, and the reason the Elo floor is 1320 rather than something a beginner would
-enjoy.
+### 10.1 The move provider seam
+
+`apps/web/lib/engine/` was written around *any worker speaking UCI*, which held for exactly as
+long as Stockfish was the only opponent. [ADR 0005](./adr/0005-human-like-bots.md) adds Maia v1
+through ONNX Runtime Web for the ratings below Stockfish's 1320 floor, and Maia does not speak
+UCI: it returns a probability distribution over legal moves, has no search that could be given
+longer, and changes strength by loading a different network rather than by setting an option.
+
+So the seam is not a transport. It is a **move provider** — `apps/web/lib/engine/move-provider.ts`:
+
+```ts
+interface MoveProvider {
+  readonly id: string;
+  init(): Promise<void>;
+  newGame(level: BotLevel): Promise<void>;
+  chooseMove(fen: string): Promise<string | null>;
+  dispose(): void;
+}
+```
+
+Four things about that shape are load-bearing:
+
+- **`newGame` takes the whole rung, not a number.** `BotLevel.elo` is a `UCI_Elo`, which is a
+  Stockfish scale and means nothing to a network trained on Lichess games. Passing the rung
+  itself lets each provider read the part it understands — Stockfish maps it to
+  `UCI_LimitStrength`/`UCI_Elo`, a Maia provider would map it to a weights file — and keeps both
+  mappings out of the shared type.
+- **`chooseMove` takes a position and no time budget.** `BOT_MOVE_TIME_MS` is a Stockfish knob;
+  a single forward pass cannot be asked to think longer. It lives with the provider that honours
+  it.
+- **UCI notation survives; the UCI protocol does not.** The return value stays a long-algebraic
+  move string because that is what chess.js is handed on the other side, and any engine worth
+  wrapping can produce one. Nothing above the seam sends a command or parses a line.
+- **`init` is separate from construction.** Loading is megabytes of WebAssembly or weights, so it
+  starts on mount and the page renders a status while it happens.
+
+The files, top to bottom:
+
+| File | Knows about |
+| --- | --- |
+| `use-engine.ts` | `MoveProvider` and React. Not which engine it has. |
+| `default-provider.ts` | Which provider `/play` gets. The one place that decides. |
+| `stockfish-provider.ts` | That a rung is a `UCI_Elo` and a move is a search. |
+| `stockfish-engine.ts` | The UCI conversation — handshake, options, `go`, `bestmove`. |
+| `worker-transport.ts` | A Web Worker carrying lines of text. |
+
+Everything UCI is in the bottom three rows. When Maia lands it is a sibling of
+`stockfish-provider.ts` and a second line in `default-provider.ts`; nothing above changes, which
+is the whole point, and is the reason ADR 0005 could reject Maia-2 *for now* without making it
+expensive to adopt later. `use-engine.test.ts` holds that line honest: it drives the hook with a
+scripted provider that has no protocol, no search and no engine behind it.
+
+**Known and deliberately not fixed here.** `recommendBotLevel` in `packages/chess/src/recommend.ts`
+takes a Chess.com rating and compares it against `UCI_Elo` rungs. Those are different scales, and
+Maia brings a third — ADR 0005 records this as a category error to fix when Maia lands. It is a
+behaviour change, so it is not mixed into the seam refactor.
 
 ## 11. Opening repertoire
 
