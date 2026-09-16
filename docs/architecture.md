@@ -558,7 +558,7 @@ Three rules hold this together:
   — the ownership chain in §5 is untouched by design. Saving played games would need a schema
   change in `packages/db` and would make them analysable like ingested ones; it is not built.
 
-The bot is Stockfish only. Human-like engines (Maia, Lc0) stay in §15 — different weights,
+The bot is Stockfish only *for now*. Human-like engines below its 1320 floor are settled by [ADR 0005](./adr/0005-human-like-bots.md) — Maia v1 in the browser via ONNX Runtime Web. Different weights,
 different runtime, and the reason the Elo floor is 1320 rather than something a beginner would
 enjoy.
 
@@ -788,10 +788,11 @@ Carried from the idea note:
 
 - Lichess as a second ingest source. The `platform` column exists for it; nothing else does.
 - Reference-literature licensing. Bootstrap on public-domain classics only.
-- Maia/Lc0 bot hosting is heavier than Stockfish — likely a separate Fly machine running a
-  CPU Lc0 build with small nets. Not scaffolded yet. This is also what a sub-1320 bot needs:
-  Stockfish's `UCI_Elo` stops there, and weakening it further produces inhuman blunders
-  ([ADR 0002](./adr/0002-browser-engine.md)).
+- ~~Maia/Lc0 bot hosting is heavier than Stockfish — likely a separate Fly machine.~~ **Settled by
+  [ADR 0005](./adr/0005-human-like-bots.md):** Maia v1 networks run client-side via ONNX Runtime
+  Web, alongside `stockfish.wasm`, so no Fly machine is needed and ADR 0001's browser-inference
+  rule holds. Not built yet — the engine seam has to become a *move provider* rather than a UCI
+  transport first, since Maia returns a move distribution rather than a best move.
 
 Raised by the coaching endpoint (section 7):
 
