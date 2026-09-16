@@ -67,14 +67,14 @@ export interface PlayBoardProps {
 }
 
 export function PlayBoard({ initialLevel, recommendation }: PlayBoardProps = {}) {
-  // `?engineLog=1` puts every UCI line in the console — see docs/browser-engine.md.
+  // `?engineLog=1` puts the engine's own diagnostics in the console — see docs/browser-engine.md.
   const log = useMemo(
     () =>
       typeof window !== 'undefined' &&
       new URLSearchParams(window.location.search).get('engineLog') === '1',
     [],
   );
-  const { status, error, newGame, bestMove } = useEngine({ log });
+  const { status, error, newGame, chooseMove } = useEngine({ log });
 
   const gameRef = useRef(new Chess());
   const [position, setPosition] = useState<Position>(() => snapshot(gameRef.current));
@@ -90,12 +90,12 @@ export function PlayBoard({ initialLevel, recommendation }: PlayBoardProps = {})
 
   /**
    * Reset the engine whenever a game starts or the level changes. Declared before the move
-   * effect so `ucinewgame` is queued ahead of any search — the engine runs one command at a
+   * effect so the reset is queued ahead of any move request — a provider serves one call at a
    * time, so the order they are queued in is the order they happen in.
    */
   useEffect(() => {
     if (status !== 'ready') return;
-    newGame(level.elo).catch((cause) => setFault(describe(cause)));
+    newGame(level).catch((cause) => setFault(describe(cause)));
   }, [status, level, gameId, newGame]);
 
   /** The bot moves whenever it is the bot's turn and the game is still going. */
@@ -105,7 +105,7 @@ export function PlayBoard({ initialLevel, recommendation }: PlayBoardProps = {})
     let live = true;
     setThinking(true);
 
-    bestMove(position.fen)
+    chooseMove(position.fen)
       .then((uci) => {
         if (!live) return;
         const move = uci === null ? null : parseUciMove(uci);
@@ -132,7 +132,7 @@ export function PlayBoard({ initialLevel, recommendation }: PlayBoardProps = {})
     return () => {
       live = false;
     };
-  }, [status, finished, position, playerColor, bestMove]);
+  }, [status, finished, position, playerColor, chooseMove]);
 
   const startNewGame = useCallback(() => {
     gameRef.current = new Chess();

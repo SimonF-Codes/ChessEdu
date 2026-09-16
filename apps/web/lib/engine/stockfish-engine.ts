@@ -9,6 +9,8 @@ import {
   toWhitePerspective,
 } from '@chessedu/chess/browser';
 
+import { MoveProviderError } from './move-provider';
+
 /**
  * Stockfish in the tab, spoken to over UCI.
  *
@@ -16,6 +18,10 @@ import {
  * different here is the plumbing — a Web Worker rather than a child process — and that is all
  * this file is. The transport is injected so the state machine can be tested without a
  * Worker, a DOM, or 7 MB of WebAssembly.
+ *
+ * This is the UCI conversation and nothing else. Turning a rung into a strength cap, and a
+ * position into a move, is stockfish-provider.ts one layer up — the seam above that knows
+ * about none of this. See §10.1 of docs/architecture.md.
  *
  * Single-threaded by construction: `Threads` is never set, because the build that would honour
  * it needs cross-origin isolation. See docs/adr/0002-browser-engine.md.
@@ -41,7 +47,8 @@ export interface SearchResult {
 const SEARCH_GRACE_MS = 10_000;
 const HANDSHAKE_TIMEOUT_MS = 20_000;
 
-export class EngineError extends Error {}
+/** A UCI-side failure. Extends the seam error so callers above can catch one thing. */
+export class EngineError extends MoveProviderError {}
 
 export class StockfishEngine {
   private disposed = false;
