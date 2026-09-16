@@ -109,6 +109,10 @@ max 1`. Measured in Chrome on this machine it searches about 1.3M nodes/second a
   header rules — the reason to revisit is a _new_ feature that needs threads, not a faster bot.
 - Stockfish's own `UCI_Elo` floor is 1320. Below that the engine can only be weakened by
   degrading its search, which produces blunders no human of that rating would make. Bots below
-  1320 are a Maia problem, not a Stockfish one, and are out of scope.
+  1320 are a Maia problem, not a Stockfish one. ~~Out of scope.~~ **Superseded in part by
+  [ADR 0005](./0005-human-like-bots.md):** the only user sits below this floor, so it was not the
+  edge case assumed here, and Maia v1 turned out to run client-side via ONNX Runtime Web rather
+  than needing a server. The reasoning above is unchanged and is precisely why a further-weakened
+  Stockfish was not the answer.
 - The engine is GPLv3. It is fetched as a standalone asset and served as-is with its license
   banner intact; nothing in this repository links against it or derives from it.
