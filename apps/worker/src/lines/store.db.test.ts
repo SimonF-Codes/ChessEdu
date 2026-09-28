@@ -119,6 +119,44 @@ describe.skipIf(!connectionString)('saveGeneratedLines', () => {
     expect(stored.every((r) => r.retiredAt === null)).toBe(true);
   });
 
+  it('keeps a retired line’s reviews and attempts — a re-run never orphans history', async () => {
+    await saveGeneratedLines({ db, family: FAMILY, lines: [line('a'), line('b')], engine: 'x' });
+    const b = (await rows()).find((r) => r.key.endsWith(':b'))!;
+    const email = `line-store-${Date.now()}@example.com`;
+    const [user] = await db
+      .insert(schema.users)
+      .values({ email })
+      .returning({ id: schema.users.id });
+    try {
+      await db.insert(schema.lineReviews).values({ userId: user!.id, lineId: b.id });
+      await db.insert(schema.lineAttempts).values({
+        attemptId: crypto.randomUUID(),
+        ply: 1,
+        userId: user!.id,
+        lineId: b.id,
+        result: 'first_try',
+        elapsedMs: 1_000,
+      });
+
+      await saveGeneratedLines({ db, family: FAMILY, lines: [line('a')], engine: 'x', now: LATER });
+
+      const retired = (await rows()).find((r) => r.id === b.id)!;
+      expect(retired.retiredAt?.getTime()).toBe(LATER.getTime());
+      const reviews = await db
+        .select()
+        .from(schema.lineReviews)
+        .where(eq(schema.lineReviews.lineId, b.id));
+      const attempts = await db
+        .select()
+        .from(schema.lineAttempts)
+        .where(eq(schema.lineAttempts.lineId, b.id));
+      expect(reviews).toHaveLength(1);
+      expect(attempts).toHaveLength(1);
+    } finally {
+      await db.delete(schema.users).where(eq(schema.users.id, user!.id));
+    }
+  });
+
   it('refuses an empty run rather than retiring the whole family', async () => {
     await saveGeneratedLines({ db, family: FAMILY, lines: [line('a')], engine: 'x', now: NOW });
     await expect(

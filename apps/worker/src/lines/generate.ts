@@ -57,12 +57,12 @@ async function main(): Promise<void> {
       let asked = 0;
       const lines = await generateLines(spec, {
         book,
-        chooseMove: async (fen) => {
+        rankMoves: async (fen, count) => {
           asked += 1;
           // A cleared hash makes the answer a function of the position alone, not of the order
           // positions happened to be asked in.
           await engine.newGame();
-          return (await engine.analyse(fen)).bestMoveUci;
+          return engine.rankMoves(fen, count);
         },
       });
 
