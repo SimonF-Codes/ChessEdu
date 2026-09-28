@@ -13,6 +13,7 @@
 export * from './bot';
 export * from './recommend';
 export * from './classify';
+export * from './line-drill';
 export * from './outcome';
 export * from './phase';
 export * from './uci';

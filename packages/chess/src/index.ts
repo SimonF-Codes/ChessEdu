@@ -2,6 +2,7 @@ export * from './book';
 export * from './browser';
 export * from './deviation';
 export * from './game-review';
+export * from './lines';
 export * from './link';
 export * from './pgn';
 export * from './repertoire';
