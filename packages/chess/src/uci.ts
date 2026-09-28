@@ -14,6 +14,8 @@ export interface EngineInfo {
   /** Plies to mate from the side-to-move perspective. */
   mateIn: number | null;
   pv: string[];
+  /** Which principal variation this is, 1 being the best. 1 when the engine runs a single line. */
+  multipv: number;
 }
 
 /**
@@ -34,6 +36,10 @@ export function parseInfoLine(line: string): EngineInfo | null {
   const scoreValue = Number(tokens[scoreIndex + 2]);
   if (!Number.isFinite(depth) || !Number.isFinite(scoreValue)) return null;
 
+  const multipvIndex = tokens.indexOf('multipv');
+  const multipv = multipvIndex === -1 ? 1 : Number(tokens[multipvIndex + 1]);
+  if (!Number.isInteger(multipv) || multipv < 1) return null;
+
   const pvIndex = tokens.indexOf('pv');
   const pv = pvIndex === -1 ? [] : tokens.slice(pvIndex + 1).filter(Boolean);
 
@@ -42,7 +48,26 @@ export function parseInfoLine(line: string): EngineInfo | null {
     scoreCp: scoreType === 'cp' ? scoreValue : null,
     mateIn: scoreType === 'mate' ? scoreValue : null,
     pv,
+    multipv,
   };
+}
+
+/**
+ * The final line of each principal variation of a MultiPV search, best first.
+ *
+ * Stockfish reports every variation again at each depth; the last complete report for each index
+ * is the answer. A variation that never names a move is dropped — it is not a move to rank.
+ */
+export function finalVariations(infos: readonly EngineInfo[]): EngineInfo[] {
+  const byIndex = new Map<number, EngineInfo>();
+  for (const info of infos) {
+    const seen = byIndex.get(info.multipv);
+    if (!seen || info.depth >= seen.depth) byIndex.set(info.multipv, info);
+  }
+  return [...byIndex.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([, info]) => info)
+    .filter((info) => info.pv.length > 0);
 }
 
 export function parseBestMove(line: string): string | null {

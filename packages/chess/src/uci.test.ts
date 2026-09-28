@@ -1,12 +1,37 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  finalVariations,
   parseBestMove,
   parseInfoLine,
   parseUciMove,
   setOptionCommand,
   toWhitePerspective,
 } from './uci';
+
+describe('finalVariations', () => {
+  const lines = [
+    'info depth 19 multipv 1 score cp 12 pv d7d5 d1a4',
+    'info depth 19 multipv 2 score cp 9 pv g8f6 d2d4',
+    'info depth 20 multipv 1 score cp 14 pv d7d5 d1a4',
+    'info depth 20 multipv 2 score cp 7 pv g8f6 d2d4',
+    'info depth 20 multipv 3 score cp -26 pv f7f5 d2d4',
+  ];
+
+  it('keeps the deepest report of each variation, in MultiPV order', () => {
+    const infos = lines.map(parseInfoLine).filter((i) => i !== null);
+    expect(finalVariations(infos).map((i) => [i.multipv, i.pv[0], i.scoreCp])).toEqual([
+      [1, 'd7d5', 14],
+      [2, 'g8f6', 7],
+      [3, 'f7f5', -26],
+    ]);
+  });
+
+  it('drops a variation that names no move', () => {
+    const infos = [parseInfoLine('info depth 5 multipv 1 score mate 0')!];
+    expect(finalVariations(infos)).toEqual([]);
+  });
+});
 
 describe('parseInfoLine', () => {
   const LINE =
@@ -22,6 +47,12 @@ describe('parseInfoLine', () => {
 
   it('reads the principal variation', () => {
     expect(parseInfoLine(LINE)?.pv).toEqual(['e2e4', 'e7e5', 'g1f3', 'b8c6']);
+  });
+
+  it('reads which principal variation a line is, and 1 when it does not say', () => {
+    expect(parseInfoLine(LINE)?.multipv).toBe(1);
+    expect(parseInfoLine('info depth 20 multipv 3 score cp -26 pv f7f5')?.multipv).toBe(3);
+    expect(parseInfoLine('info depth 15 score cp 10 pv e2e4')?.multipv).toBe(1);
   });
 
   it('reads a mate score and leaves the centipawn score empty', () => {

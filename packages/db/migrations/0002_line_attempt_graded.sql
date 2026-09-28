@@ -1,0 +1,1 @@
+ALTER TABLE "line_attempt" ADD COLUMN "graded" boolean DEFAULT true NOT NULL;

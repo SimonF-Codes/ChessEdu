@@ -116,7 +116,7 @@ export class StockfishEngine {
         this.send(`go movetime ${moveTimeMs}`);
       });
 
-      const info: EngineInfo = best ?? { depth: 0, scoreCp: 0, mateIn: null, pv: [] };
+      const info: EngineInfo = best ?? { depth: 0, scoreCp: 0, mateIn: null, pv: [], multipv: 1 };
       return {
         bestMoveUci,
         evaluation: toWhitePerspective(info, sideToMove(fen)),
