@@ -15,7 +15,12 @@ import { defineWorkspace } from 'vitest/config';
  */
 
 const shared = {
-  include: ['packages/*/src/**/*.test.ts', 'apps/*/src/**/*.test.ts', 'apps/*/lib/**/*.test.ts'],
+  include: [
+    'packages/*/src/**/*.test.ts',
+    'apps/*/src/**/*.test.ts',
+    'apps/*/lib/**/*.test.ts',
+    'test/**/*.test.ts',
+  ],
   exclude: ['**/node_modules/**', '**/dist/**', '**/.next/**', '**/e2e/**'],
 };
 
@@ -36,6 +41,10 @@ export default defineWorkspace([
         'apps/*/lib/**/*.db.test.ts',
       ],
       exclude: shared.exclude,
+      // Runs before any db suite and throws if TEST_DATABASE_URL and DATABASE_URL are the same
+      // database. These suites truncate `user`, which cascades to every game and every analysis
+      // row — see the note in test/db-guard.ts for the time that actually happened.
+      setupFiles: ['./test/db-guard.ts'],
       // One database, one file at a time.
       //
       // `fileParallelism` is a root-level option and is silently ignored inside a project,
