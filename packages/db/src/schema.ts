@@ -425,6 +425,11 @@ export const lineAttempts = pgTable(
     /** Legal moves tried that were not the line's, in order. */
     wrongUci: text('wrong_uci').array().notNull().default(sql`ARRAY[]::text[]`),
     elapsedMs: integer('elapsed_ms').notNull(),
+    /**
+     * False for a practice replay: recorded, but it did not move the line's schedule. Only the
+     * attempt that meets a due line is graded (ADR 0007). Same on every row of one attempt.
+     */
+    graded: boolean('graded').notNull().default(true),
     attemptedAt: timestamp('attempted_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

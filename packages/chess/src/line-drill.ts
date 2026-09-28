@@ -75,6 +75,20 @@ export function lineOutcome(plies: readonly PlyAttempt[], expectedPlies: number)
 }
 
 /**
+ * Whether an attempt moves the line's schedule, or is practice (ADR 0007).
+ *
+ * Only the attempt that meets a line which is due — or has never been tried — is graded. Grading
+ * it pushes the due date at least a day out, so every replay after it in the same sitting finds
+ * the line not yet due and is recorded as practice: kept, per move, but never shown to SM-2. A
+ * line solved cleanly on the third go is not a line the learner knows, and letting that third go
+ * overwrite the first would make the grade something the learner chooses by retrying, not
+ * something the board measured.
+ */
+export function isGradedAttempt(dueAt: Date | null, now: Date): boolean {
+  return dueAt === null || dueAt.getTime() <= now.getTime();
+}
+
+/**
  * Check an attempt the client reported against the line it claims to be for, and clean it.
  *
  * It must carry exactly one entry per learner move, in order — an abandoned line reports its
@@ -143,6 +157,8 @@ export function selectNextLine<C extends LineCandidate>(
 export interface LineAttemptRecord {
   attemptId: string;
   attemptedAt: Date;
+  /** False for a practice replay, which was recorded but did not move the schedule. */
+  graded: boolean;
   plies: PlyAttempt[];
 }
 
@@ -159,6 +175,8 @@ export interface PlyHistory {
 
 export interface LineHistory {
   attempts: number;
+  /** How many of `attempts` were practice replays rather than graded reviews. */
+  practice: number;
   plies: PlyHistory[];
   /** Learner moves found first time, from the start, in the latest attempt. */
   cleanPrefix: number;
@@ -171,6 +189,9 @@ export interface LineHistory {
  * What the record of a line says, per move — "first 3 moves clean — 4.Qa4 missed 3 times
  * running". `attempts` is newest first, as the query returns them. Everything is computed from
  * the per-ply rows; there is no stored summary to disagree with them.
+ *
+ * Practice replays count here like any other attempt: missing a move on the replay straight after
+ * missing it is exactly the pattern this is for. Only the schedule ignores them.
  */
 export function summariseLineHistory(
   line: DrillLine,
@@ -195,13 +216,22 @@ export function summariseLineHistory(
   });
 
   if (attempts.length === 0) {
-    return { attempts: 0, plies, cleanPrefix: 0, breakdown: null, summary: 'Not attempted yet.' };
+    return {
+      attempts: 0,
+      practice: 0,
+      plies,
+      cleanPrefix: 0,
+      breakdown: null,
+      summary: 'Not attempted yet.',
+    };
   }
 
+  const practice = attempts.filter((a) => !a.graded).length;
   const firstMiss = plies.findIndex((p) => p.lastResult !== 'first_try');
   if (firstMiss === -1) {
     return {
       attempts: attempts.length,
+      practice,
       plies,
       cleanPrefix: plies.length,
       breakdown: null,
@@ -228,5 +258,12 @@ export function summariseLineHistory(
     summary = `Broke down on the first move, ${breakdown.label}.`;
   }
 
-  return { attempts: attempts.length, plies, cleanPrefix: firstMiss, breakdown, summary };
+  return {
+    attempts: attempts.length,
+    practice,
+    plies,
+    cleanPrefix: firstMiss,
+    breakdown,
+    summary,
+  };
 }

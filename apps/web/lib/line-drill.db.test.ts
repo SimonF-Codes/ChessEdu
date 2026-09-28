@@ -245,6 +245,108 @@ describe.skipIf(!connectionString)('line drill', () => {
     });
   });
 
+  describe('replaying a line (ADR 0007)', () => {
+    const MINUTE_MS = 60_000;
+
+    it('adds every replay as a new attempt, and never overwrites the one before', async () => {
+      const results: PlyResult[][] = [
+        ['first_try', 'first_try', 'first_try', 'revealed'],
+        ['first_try', 'first_try', 'first_try', 'second_try'],
+        ['first_try', 'first_try', 'first_try', 'revealed'],
+        CLEAN,
+      ];
+      const ids: string[] = [];
+      for (const [index, plies] of results.entries()) {
+        const recorded = await recordLineAttempt({
+          db,
+          userId,
+          lineId,
+          plies: attempt(plies),
+          now: new Date(NOW.getTime() + index * MINUTE_MS),
+        });
+        ids.push(recorded!.attemptId);
+      }
+
+      expect(new Set(ids).size).toBe(4);
+      const rows = await db
+        .select()
+        .from(schema.lineAttempts)
+        .where(and(eq(schema.lineAttempts.userId, userId), eq(schema.lineAttempts.lineId, lineId)));
+      expect(rows).toHaveLength(16);
+
+      // The per-move record keeps every miss at 4.Qa4, in order, newest first.
+      const history = await loadLineHistory({ db, userId, lineId });
+      expect(history.map((a) => a.plies.at(-1)!.result)).toEqual([
+        'first_try',
+        'revealed',
+        'second_try',
+        'revealed',
+      ]);
+      expect(history.map((a) => a.graded)).toEqual([false, false, false, true]);
+    });
+
+    it('grades only the attempt that met the line due — a clean replay cannot lift the lapse', async () => {
+      const first = await recordLineAttempt({
+        db,
+        userId,
+        lineId,
+        plies: attempt(['first_try', 'first_try', 'first_try', 'revealed']),
+        now: NOW,
+      });
+      expect(first).toMatchObject({ outcome: 'again', graded: true });
+
+      const replay = await recordLineAttempt({
+        db,
+        userId,
+        lineId,
+        plies: attempt(CLEAN),
+        now: new Date(NOW.getTime() + MINUTE_MS),
+      });
+      // What the replay would have earned is reported; it is not applied.
+      expect(replay).toMatchObject({ outcome: 'easy', graded: false });
+      expect(replay!.scheduled.dueAt.getTime()).toBe(first!.scheduled.dueAt.getTime());
+
+      const review = await db.query.lineReviews.findFirst({
+        where: and(eq(schema.lineReviews.userId, userId), eq(schema.lineReviews.lineId, lineId)),
+      });
+      expect(review).toMatchObject({
+        repetitions: 0,
+        lapses: 1,
+        intervalDays: LAPSE_INTERVAL_DAYS,
+      });
+      expect(review!.dueAt.getTime()).toBe(first!.scheduled.dueAt.getTime());
+
+      const graded = await db
+        .select({ attemptId: schema.lineAttempts.attemptId, graded: schema.lineAttempts.graded })
+        .from(schema.lineAttempts)
+        .where(eq(schema.lineAttempts.lineId, lineId));
+      expect(graded.filter((r) => r.graded).every((r) => r.attemptId === first!.attemptId)).toBe(
+        true,
+      );
+      expect(graded.filter((r) => !r.graded).every((r) => r.attemptId === replay!.attemptId)).toBe(
+        true,
+      );
+    });
+
+    it('grades the line again once it comes due', async () => {
+      const first = await recordLineAttempt({
+        db,
+        userId,
+        lineId,
+        plies: attempt(CLEAN),
+        now: NOW,
+      });
+      const due = first!.scheduled.dueAt;
+      const next = await recordLineAttempt({ db, userId, lineId, plies: attempt(CLEAN), now: due });
+      expect(next!.graded).toBe(true);
+
+      const review = await db.query.lineReviews.findFirst({
+        where: and(eq(schema.lineReviews.userId, userId), eq(schema.lineReviews.lineId, lineId)),
+      });
+      expect(review!.repetitions).toBe(2);
+    });
+  });
+
   describe('loadLineHistory', () => {
     it('returns this user’s attempts at this line, newest first, plies in order', async () => {
       await recordLineAttempt({ db, userId, lineId, plies: attempt(CLEAN), now: NOW });

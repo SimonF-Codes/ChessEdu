@@ -11,8 +11,8 @@ export const metadata = { title: 'Lines — ChessEdu' };
 
 /**
  * Opening line repetition. Which line is next is the pure rule in packages/chess; the lines
- * themselves were chosen by Stockfish against the ECO book's branches (ADR 0006). This page
- * supplies the line and its history, and the board does the rest.
+ * themselves were chosen by Stockfish, the ECO book only naming them (ADR 0006, ADR 0007). This
+ * page supplies the line and its history, and the board does the rest.
  */
 export default async function LinesPage() {
   const user = await requireUser();
@@ -30,9 +30,10 @@ export default async function LinesPage() {
     <div className="max-w-2xl space-y-2">
       <h1 className="text-2xl font-semibold tracking-tight">Lines — the Ponziani</h1>
       <p className="text-sm text-neutral-600 dark:text-neutral-400">
-        1.e4 e5 2.Nf3 Nc6 3.c3, as White. Black&apos;s replies are the named ones from opening
-        theory; every White move after 3.c3 is Stockfish&apos;s. Play the line until it is automatic
-        — a wrong move is corrected and the line carries on.
+        1.e4 e5 2.Nf3 Nc6 3.c3, as White. Black&apos;s replies are the ones Stockfish rates close to
+        its best, named or not; every White move after 3.c3 is Stockfish&apos;s. Play the line until
+        it is automatic — a wrong move is corrected and the line carries on, and you can run it
+        again straight away.
       </p>
     </div>
   );
