@@ -112,6 +112,10 @@ erDiagram
     users ||--o{ chess_accounts : links
     users ||--o{ link_challenges : proves
     users ||--o{ puzzles : practices
+    users ||--o{ line_reviews : drills
+    users ||--o{ line_attempts : "per ply"
+    opening_lines ||--o{ line_reviews : "scheduled as"
+    opening_lines ||--o{ line_attempts : "attempted as"
     chess_accounts ||--o{ archives : "monthly PGN dumps"
     chess_accounts ||--o{ games : owns
     games ||--o{ moves : "has ply"
@@ -124,6 +128,10 @@ erDiagram
 The ownership chain is always `users -> chess_accounts -> games -> ...`. Every query the web
 app makes is scoped by `userId` at the top of that chain; there is no row a user can reach
 that is not reachable through their own `users.id`.
+
+`opening_lines` is the one exception, and not a hole in it: it is a shared catalogue of drillable
+lines with no owner (§15). What a user does with a line — `line_reviews`, `line_attempts` — hangs
+off `users` like everything else.
 
 ## 6. The coaching boundary
 
@@ -187,7 +195,7 @@ scopes every query by the result, exactly like the server actions do.
 `history` is echoed back to the model as conversation, but it is **not** a source of facts. Every
 number in the next answer is re-read from `move_analysis` / `game_analysis` on this request. A
 client that edits an assistant turn to claim a different evaluation changes the prose it is
-replying to and nothing else. Persisting threads server-side is deferred — see section 15.
+replying to and nothing else. Persisting threads server-side is deferred — see section 16.
 
 ### 7.3 Response — an SSE stream
 
@@ -369,7 +377,7 @@ requests, because a silent cache miss is otherwise invisible until the bill arri
 - **Retrieval** over `corpus_chunks`. Until it lands the endpoint runs with zero chunks and emits no
   citations; the contract does not change when it arrives.
 - **The rate-limit mechanism.** The surface is fixed (`429` + `Retry-After`); where the counter lives
-  is open — see section 15.
+  is open — see section 16.
 
 ## 8. Analysis pipeline
 
@@ -836,7 +844,72 @@ real, a `move_commentary` table is the obvious next step.
   browser.
 - **The worker exposes no inbound port.** It polls Postgres; nothing can call it.
 
-## 15. Open questions
+## 15. Opening line drill
+
+The repertoire (§11) shows the lines a player has played. The line drill teaches ones they have
+not: a fixed sequence, repeated move by move until it is automatic, with a record of **where** it
+breaks. First and only opening so far: the Ponziani (C44, `1.e4 e5 2.Nf3 Nc6 3.c3`), learner as
+White. The decisions and what lost are in [ADR 0006](./adr/0006-opening-line-drill.md).
+
+```mermaid
+flowchart LR
+    ECO[("ECO book<br/>defaultBook()")] -->|"Black's branches"| GEN["generateLines()<br/>packages/chess/src/lines.ts"]
+    SF["Stockfish<br/>apps/worker Engine"] -->|"White's move<br/>at every node"| GEN
+    GEN --> SCRIPT["lines/generate.ts<br/>(run by hand)"]
+    SCRIPT --> OL[("opening_line")]
+    OL --> Q["lib/line-drill.ts<br/>next line, scoped by user"]
+    LR2[("line_review<br/>SM-2 state")] --> Q
+    Q --> UI["/lines<br/>chess.js + react-chessboard"]
+    UI -->|"per-ply results"| A["recordLineAttemptAction"]
+    A -->|"lineOutcome()"| SRS["srs.ts<br/>gradeReview"]
+    A --> LA[("line_attempt<br/>one row per ply")]
+    SRS --> LR2
+    LA -->|"summariseLineHistory()"| UI
+```
+
+**Who chooses the moves.** Inside the root the opening's own definition does. After it, White's
+move at every node is **Stockfish's best move**; Black **branches on every ECO continuation** for
+its first `LINE_BRANCH_DECISIONS` (2) decisions and plays Stockfish's move after that. Lines are
+`LINE_DEPTH_PLIES` (11) long, so each ends on the learner's move. The model plays no part: which
+move is right is an evaluation, and §6 gives evaluations to the engine.
+
+**Generation is a script, not a job.** `npm run lines:generate --workspace @chessedu/worker`
+replays the tree against the worker's `Engine` at a fixed depth and upserts into `opening_line`,
+retiring lines the run no longer produces. Lines are shared content that changes when the engine
+or the book does, not per user — see ADR 0006.
+
+**The drill.** `/lines` picks the most overdue line the user has reviewed, else one they have
+never tried. The learner plays White; Black's reply from the stored line is played back at once.
+
+| The learner | The board |
+|---|---|
+| plays the line's move | accepts it, plays Black's reply |
+| plays another legal move, first time | rejects it — "not that one" — one more try |
+| plays another legal move, second time, or presses *Show me* | plays the right move, names it, continues |
+| presses *Stop* | reveals the rest; every remaining ply is recorded as abandoned |
+
+A wrong move never ends the line — the moves after it are exactly the ones worth drilling.
+
+**Grading is derived, never self-reported.** `lineOutcome` turns the per-ply results into a
+`ReviewOutcome` — any reveal or abandon is `again`, any second try is `hard`, all first try is
+`good`, and all first try inside `QUICK_SOLVE_MS` each is `easy` — and `gradeReview` from
+`srs.ts`, unchanged, schedules the line. There is no rating button.
+
+**The history is per ply.** One `line_attempt` row per learner move per attempt, carrying the
+result, the wrong moves tried and the time taken. `summariseLineHistory` reads the recent ones back
+into "first 3 moves clean — 5.d4 missed 3 times running"; there is no summary column to disagree
+with the rows.
+
+**Ownership.** `opening_line` is a catalogue with no owner, the same for every user. `line_review`
+and `line_attempt` hang off `users` and every query on them is scoped by the session user; an
+attempt for a line id that does not exist records nothing. Drilled lines do **not** feed
+`/openings`, which stays a record of games actually played.
+
+**Not handled, deliberately.** Transpositions (a line is its move order), Black repertoires, other
+openings, and the coach explaining a missed move — the generator does not yet keep the engine's
+evaluation per ply, which that explanation would need as its given facts.
+
+## 16. Open questions
 
 Carried from the idea note:
 
