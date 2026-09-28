@@ -849,29 +849,36 @@ real, a `move_commentary` table is the obvious next step.
 The repertoire (§11) shows the lines a player has played. The line drill teaches ones they have
 not: a fixed sequence, repeated move by move until it is automatic, with a record of **where** it
 breaks. First and only opening so far: the Ponziani (C44, `1.e4 e5 2.Nf3 Nc6 3.c3`), learner as
-White. The decisions and what lost are in [ADR 0006](./adr/0006-opening-line-drill.md).
+White. The decisions and what lost are in [ADR 0006](./adr/0006-opening-line-drill.md) and
+[ADR 0007](./adr/0007-line-coverage-and-replay.md), which replaced 0006's branching rule and added
+replay.
 
 ```mermaid
 flowchart LR
-    ECO[("ECO book<br/>defaultBook()")] -->|"Black's branches"| GEN["generateLines()<br/>packages/chess/src/lines.ts"]
-    SF["Stockfish<br/>apps/worker Engine"] -->|"White's move<br/>at every node"| GEN
+    ECO[("ECO book<br/>defaultBook()")] -->|"names only"| GEN["generateLines()<br/>packages/chess/src/lines.ts"]
+    SF["Stockfish MultiPV<br/>apps/worker Engine"] -->|"White: best move<br/>Black: replies near best"| GEN
     GEN --> SCRIPT["lines/generate.ts<br/>(run by hand)"]
     SCRIPT --> OL[("opening_line")]
     OL --> Q["lib/line-drill.ts<br/>next line, scoped by user"]
     LR2[("line_review<br/>SM-2 state")] --> Q
     Q --> UI["/lines<br/>chess.js + react-chessboard"]
     UI -->|"per-ply results"| A["recordLineAttemptAction"]
-    A -->|"lineOutcome()"| SRS["srs.ts<br/>gradeReview"]
+    A -->|"lineOutcome(),<br/>only if isGradedAttempt()"| SRS["srs.ts<br/>gradeReview"]
     A --> LA[("line_attempt<br/>one row per ply")]
     SRS --> LR2
     LA -->|"summariseLineHistory()"| UI
 ```
 
 **Who chooses the moves.** Inside the root the opening's own definition does. After it, White's
-move at every node is **Stockfish's best move**; Black **branches on every ECO continuation** for
-its first `LINE_BRANCH_DECISIONS` (2) decisions and plays Stockfish's move after that. Lines are
-`LINE_DEPTH_PLIES` (11) long, so each ends on the learner's move. The model plays no part: which
-move is right is an evaluation, and §6 gives evaluations to the engine.
+move at every node is **Stockfish's best move** — one answer per position. Black **branches on the
+replies Stockfish rates within a margin of its best**, capped per decision (`selectReplies`,
+`PONZIANI_BRANCHING`: up to 6 within 100 cp at `3.c3`, up to 3 within 50 cp at the next decision),
+and plays Stockfish's single best move after that. For the Ponziani that is 15 lines, including
+`3...d6` and `3...a6`, which ECO does not name. The ECO book only **names** a line: the deepest
+named position it passes, plus any branch choices after it (`Ponziani Opening · 3...a6, 4...d6`).
+Lines are `LINE_DEPTH_PLIES` (11) long, so each ends on the learner's move, and every line is
+drilled from move one, shared prefix included. The model plays no part: which move is right is an
+evaluation, and §6 gives evaluations to the engine.
 
 **Generation is a script, not a job.** `npm run lines:generate --workspace @chessedu/worker`
 replays the tree against the worker's `Engine` at a fixed depth and upserts into `opening_line`,
@@ -885,8 +892,10 @@ never tried. The learner plays White; Black's reply from the stored line is play
 |---|---|
 | plays the line's move | accepts it, plays Black's reply |
 | plays another legal move, first time | rejects it — "not that one" — one more try |
-| plays another legal move, second time, or presses *Show me* | plays the right move, names it, continues |
+| plays another legal move, second time, or presses *Show me* | plays the right move, names it, takes it back; the learner must play it to continue (recorded as revealed) |
 | presses *Stop* | reveals the rest; every remaining ply is recorded as abandoned |
+| presses *Start again* (offered once a move has gone wrong) | records this attempt with the rest abandoned, and restarts from move one |
+| presses *Try this line again* (at the end) | restarts from move one as a new attempt |
 
 A wrong move never ends the line — the moves after it are exactly the ones worth drilling.
 
@@ -895,10 +904,17 @@ A wrong move never ends the line — the moves after it are exactly the ones wor
 `good`, and all first try inside `QUICK_SOLVE_MS` each is `easy` — and `gradeReview` from
 `srs.ts`, unchanged, schedules the line. There is no rating button.
 
+**Replays are practice.** Only the attempt that meets a line which is due, or never tried, is
+graded (`isGradedAttempt`, decided under the `line_review` row lock). Grading pushes the due date
+at least a day out, so every replay after it is recorded with `graded = false` and leaves the
+schedule alone: a line solved cleanly on the third go cannot upgrade the first go's `hard`. The
+practice outcome is still shown to the learner, marked as such.
+
 **The history is per ply.** One `line_attempt` row per learner move per attempt, carrying the
-result, the wrong moves tried and the time taken. `summariseLineHistory` reads the recent ones back
-into "first 3 moves clean — 5.d4 missed 3 times running"; there is no summary column to disagree
-with the rows.
+result, the wrong moves tried, the time taken and whether it was graded. A replay is a new
+attempt, never an edit of the last. `summariseLineHistory` reads the recent ones back — practice
+included, since missing a move again on the replay is the pattern it is for — into "first 3 moves
+clean — 5.d4 missed 3 times running"; there is no summary column to disagree with the rows.
 
 **Ownership.** `opening_line` is a catalogue with no owner, the same for every user. `line_review`
 and `line_attempt` hang off `users` and every query on them is scoped by the session user; an
