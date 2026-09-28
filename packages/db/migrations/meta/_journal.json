@@ -8,6 +8,13 @@
       "when": 1787873150488,
       "tag": "0000_useful_patch",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1790615519474,
+      "tag": "0001_opening_line_drill",
+      "breakpoints": true
     }
   ]
 }
