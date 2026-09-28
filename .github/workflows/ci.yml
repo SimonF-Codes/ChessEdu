@@ -34,8 +34,12 @@ jobs:
           --health-retries 10
 
     env:
-      DATABASE_URL: postgres://chessedu:chessedu@localhost:5432/chessedu_test
+      # Two databases on one server, deliberately. The db suites truncate `user`, which cascades
+      # to every game and analysis row, so they must never share a database with the application
+      # — see test/db-guard.ts, which refuses to run when these two match.
+      DATABASE_URL: postgres://chessedu:chessedu@localhost:5432/chessedu_app
       TEST_DATABASE_URL: postgres://chessedu:chessedu@localhost:5432/chessedu_test
+      ADMIN_DATABASE_URL: postgres://chessedu:chessedu@localhost:5432/chessedu_test
       CHESSCOM_CONTACT: ci@chessedu.invalid
       AUTH_SECRET: ci-only-not-a-real-secret
       AUTH_GOOGLE_ID: ci
@@ -57,11 +61,19 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Enable pgvector
-        run: psql "$DATABASE_URL" -c 'create extension if not exists vector;'
+      - name: Create the application database
+        # The service container only creates POSTGRES_DB (chessedu_test).
+        run: psql "$ADMIN_DATABASE_URL" -c 'create database chessedu_app;'
 
-      - name: Apply migrations
-        run: npm run db:migrate
+      - name: Enable pgvector on both
+        run: |
+          psql "$DATABASE_URL" -c 'create extension if not exists vector;'
+          psql "$TEST_DATABASE_URL" -c 'create extension if not exists vector;'
+
+      - name: Apply migrations to both
+        run: |
+          npm run db:migrate
+          DATABASE_URL="$TEST_DATABASE_URL" npm run db:migrate
 
       - name: Test
         # Includes the Postgres-backed suites, which are skipped without TEST_DATABASE_URL.
