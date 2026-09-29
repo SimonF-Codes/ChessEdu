@@ -85,8 +85,9 @@ Every consumer treats `null` as "no engine opinion", not as zero.
 
 **Why six plies of `pv`.** The engine detector that uses it ("prepares `d4`") looks at the mover's
 next two moves, which are `pv[1]` and `pv[3]`; six plies is that window with room to spare. At six
-UCI moves a ply adds about 100 bytes of JSON, roughly 17 KB across the Ponziani's 15 lines × 11
-plies. A full PV would be three to five times that for no detector that reads it.
+UCI moves a ply adds about 100 bytes of JSON; only the 6 searched plies of each line carry facts,
+so the Ponziani's 15 lines gain about 9 KB (the whole `plies` payload is 33 KB after the first
+run). A full PV would be three to five times the facts for no detector that reads it.
 
 **No SQL migration.** `plies` is already `jsonb`; the change is to the TypeScript type both
 `packages/chess` and `packages/db` give it. `drizzle-kit generate` reports no schema change, and
@@ -159,7 +160,10 @@ shows the motifs alone; the missing entry is a tested path, not an error.
   point: they cannot drift from the position.
 - **Asking for two moves at White's nodes can change a White move** where the engine's MultiPV-2
   search disagrees with its MultiPV-1 search at the same depth. A changed move is a new key; the
-  old line is retired and its history kept, as ADR 0006 intends.
+  old line is retired and its history kept, as ADR 0006 intends. The first run (2026-09-29,
+  depth 20) kept 10 of the 15 keys and changed 5 — `3...d5 4.Qa4 Qd6`, the three `3...d6` lines
+  and `3...a6 4.d4 Nf6` — each at a move after the branching. One of the five had been drilled;
+  its review and attempts stay on the retired row, and its successor starts as new.
 - **Old rows have no facts** until the generator runs again; the tutor says less about them rather
   than anything false.
 - **Detectors are heuristics, not an engine.** "Attacks the knight" is true of the board; it does

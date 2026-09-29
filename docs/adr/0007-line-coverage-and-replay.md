@@ -178,7 +178,8 @@ is copying, not recall. This lives entirely in the drill component; `PlyResult`,
 - **The engine's scores reach the walk but are not stored.** `rankMoves` returns `scoreCp` and
   `mateIn` for every move it ranks, so keeping an evaluation on each ply — which explaining a move
   later needs — is a change to what `generateLines` copies into `LinePly`, not to the engine seam.
-  Not done here.
+  Not done here. **Done by [ADR 0008](./0008-computed-tutor-and-learn-mode.md)**, which stores
+  the score, a capped PV and the gap to the runner-up on every searched ply.
 - **Two old lines retire**: `3...Be7` (Romanishin) and `3...d5 4.Qa4 Nf6` (Leonhardt). Their
   `line_review` and `line_attempt` rows stay, pointing at retired lines, as `retired_at` intends.
   The five others keep their keys, and with them their history.
