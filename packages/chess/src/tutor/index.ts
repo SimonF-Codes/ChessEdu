@@ -9,3 +9,4 @@ export * from './boundary';
 export * from './detectors';
 export * from './explain';
 export type * from './types';
+export * from './library';
