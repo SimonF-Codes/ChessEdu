@@ -343,6 +343,18 @@ export interface OpeningLinePly {
    * lines generated before that, when the ECO book chose the branches.
    */
   source: 'opening' | 'engine' | 'branch' | 'book';
+  /**
+   * What the generator's search said about the move (ADR 0008): the score after it from White's
+   * side, the engine's continuation (UCI, at most six plies), and its lead over the best other
+   * move from the mover's side. Null on root plies, which are never searched; absent on lines
+   * stored before ADR 0008. The tutor reads every number it states from here.
+   */
+  facts?: {
+    scoreCp: number | null;
+    mateIn: number | null;
+    pv: string[];
+    gapCp: number | null;
+  } | null;
 }
 
 /**

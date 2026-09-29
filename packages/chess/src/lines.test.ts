@@ -8,12 +8,14 @@ import {
   type RankMoves,
   type RankedMove,
   LINE_DEPTH_PLIES,
+  PLY_PV_LIMIT,
   PONZIANI,
   PONZIANI_BRANCHING,
   generateLines,
   lineKey,
   moveScore,
   nameLine,
+  plyFacts,
   selectReplies,
 } from './lines';
 
@@ -343,12 +345,13 @@ describe('generateLines', () => {
     expect(asked.some(([fen]) => fen === new Chess().fen())).toBe(false);
   });
 
-  it('never branches the learner: one engine move per White node, asked for exactly one', async () => {
+  it('never branches the learner: one engine move per White node, the runner-up only measured', async () => {
     const { rank, asked } = recording(flat);
     const lines = await generateLines(TOY, { book: TOY_BOOK, rankMoves: rank });
 
+    // Two, not one: the second is what gapCp is measured against (ADR 0008). Only one is played.
     for (const [fen, count] of asked) {
-      if (new Chess(fen).turn() === 'w') expect(count).toBe(1);
+      if (new Chess(fen).turn() === 'w') expect(count).toBe(2);
     }
     for (const line of lines) {
       for (const ply of line.plies.slice(5)) {
@@ -390,8 +393,9 @@ describe('generateLines', () => {
     expect(new Set(blackCounts.filter(([move]) => move === 4).map(([, c]) => c))).toEqual(
       new Set([2]),
     );
+    // Past the rules Black plays the engine's one move, but a runner-up is still asked for.
     expect(new Set(blackCounts.filter(([move]) => move === 5).map(([, c]) => c))).toEqual(
-      new Set([1]),
+      new Set([2]),
     );
   });
 
@@ -498,5 +502,122 @@ describe('generateLines', () => {
     // The line would end on Black's mating move; it is trimmed back to White's last move.
     expect(lines).toHaveLength(1);
     expect(sanOf(lines[0]!)).toEqual(['f3', 'e5', 'g4']);
+  });
+});
+
+describe('plyFacts — the engine facts stored with a searched ply', () => {
+  const pv = (...ucis: string[]) => ucis;
+
+  it('keeps the score after the move from White’s perspective, whoever moved', () => {
+    const white = plyFacts([{ uci: 'd2d4', scoreCp: 30, mateIn: null }], 'd2d4', 'w');
+    expect(white).toMatchObject({ scoreCp: 30, mateIn: null });
+
+    const black = plyFacts([{ uci: 'd7d5', scoreCp: 14, mateIn: null }], 'd7d5', 'b');
+    expect(black).toMatchObject({ scoreCp: -14, mateIn: null });
+
+    const mated = plyFacts([{ uci: 'd8h4', scoreCp: null, mateIn: 1 }], 'd8h4', 'b');
+    expect(mated).toMatchObject({ scoreCp: null, mateIn: -1 });
+  });
+
+  it('measures the best move’s lead over the runner-up — what tells an only move from one of several', () => {
+    const ranked = [
+      { uci: 'd2d4', scoreCp: 120, mateIn: null },
+      { uci: 'd1a4', scoreCp: -60, mateIn: null },
+    ];
+    expect(plyFacts(ranked, 'd2d4', 'w')!.gapCp).toBe(180);
+  });
+
+  it('gives a branch reply below the best a negative gap: how far behind the best it sits', () => {
+    const ranked = [
+      { uci: 'd7d5', scoreCp: 14, mateIn: null },
+      { uci: 'g8f6', scoreCp: 7, mateIn: null },
+      { uci: 'a7a6', scoreCp: -53, mateIn: null },
+    ];
+    expect(plyFacts(ranked, 'a7a6', 'b')!.gapCp).toBe(-67);
+    expect(plyFacts(ranked, 'g8f6', 'b')!.gapCp).toBe(-7);
+    expect(plyFacts(ranked, 'd7d5', 'b')!.gapCp).toBe(7);
+  });
+
+  it('has no gap with no runner-up to measure against, and none across a mate', () => {
+    expect(plyFacts([{ uci: 'e1g1', scoreCp: 10, mateIn: null }], 'e1g1', 'w')!.gapCp).toBeNull();
+    const mating = [
+      { uci: 'd1h5', scoreCp: null, mateIn: 2 },
+      { uci: 'g1f3', scoreCp: 40, mateIn: null },
+    ];
+    expect(plyFacts(mating, 'd1h5', 'w')!.gapCp).toBeNull();
+  });
+
+  it('stores the continuation after the move, not the move itself, capped', () => {
+    const long = pv('d2d4', 'e5d4', 'c3d4', 'd7d5', 'e4e5', 'c8f5', 'b1c3', 'e7e6', 'f1d3');
+    const facts = plyFacts([{ uci: 'd2d4', scoreCp: 30, mateIn: null, pv: long }], 'd2d4', 'w');
+    expect(facts!.pv).toEqual(long.slice(1, 1 + PLY_PV_LIMIT));
+    expect(PLY_PV_LIMIT).toBe(6);
+  });
+
+  it('stores an empty continuation when the engine gave none', () => {
+    expect(plyFacts([{ uci: 'd2d4', scoreCp: 30, mateIn: null }], 'd2d4', 'w')!.pv).toEqual([]);
+  });
+
+  it('is null for a move the engine did not rank — there is nothing to store about it', () => {
+    expect(plyFacts([{ uci: 'd2d4', scoreCp: 30, mateIn: null }], 'c2c4', 'w')).toBeNull();
+  });
+});
+
+describe('generateLines — engine facts on every searched ply', () => {
+  /** `flat`, but with a distinct score per rank and a principal variation that starts with the move. */
+  const graded: RankMoves = async (fen, count) => {
+    const board = new Chess(fen);
+    return board
+      .moves({ verbose: true })
+      .slice(0, count)
+      .map((move, index) => {
+        board.move(move.san);
+        const reply = board.moves({ verbose: true })[0];
+        board.undo();
+        return {
+          uci: uciOf(move),
+          scoreCp: 50 - index * 40,
+          mateIn: null,
+          pv: reply ? [uciOf(move), uciOf(reply)] : [uciOf(move)],
+        };
+      });
+  };
+
+  it('leaves the root without facts: it was never searched', async () => {
+    const lines = await generateLines(TOY, { book: TOY_BOOK, rankMoves: graded });
+    for (const line of lines) {
+      expect(line.plies.slice(0, 5).every((p) => p.facts === null)).toBe(true);
+    }
+  });
+
+  it('stores the score, gap and continuation on every ply after the root', async () => {
+    const lines = await generateLines(TOY, { book: EMPTY_BOOK, rankMoves: graded });
+    for (const line of lines) {
+      for (const ply of line.plies.slice(5)) {
+        expect(ply.facts).not.toBeNull();
+        expect(ply.facts!.pv.length).toBeGreaterThan(0);
+        expect(ply.facts!.gapCp).not.toBeNull();
+      }
+    }
+    const [first] = lines;
+    // White's engine move is the best of two: 50 against 10, from White's side.
+    const white = first!.plies[6]!;
+    expect(white.facts).toMatchObject({ scoreCp: 50, gapCp: 40 });
+    // Black's branch replies are scored from Black's side, stored from White's.
+    const black = lines.map((line) => line.plies[5]!);
+    expect(black[0]!.facts).toMatchObject({ scoreCp: -50, gapCp: 40 });
+    expect(black.find((p) => p.facts!.gapCp! < 0)).toBeDefined();
+  });
+
+  it('stores the same facts for the same node in every line that passes it', async () => {
+    const lines = await generateLines(TOY, { book: EMPTY_BOOK, rankMoves: graded });
+    const seen = new Map<string, unknown>();
+    for (const line of lines) {
+      for (const ply of line.plies) {
+        const key = `${ply.fenBefore}|${ply.uci}`;
+        if (seen.has(key)) expect(ply.facts).toEqual(seen.get(key));
+        seen.set(key, ply.facts);
+      }
+    }
   });
 });

@@ -36,6 +36,28 @@ export const LINE_DEPTH_PLIES = 11;
  */
 export type LineMoveSource = 'opening' | 'engine' | 'branch' | 'book';
 
+/** The longest continuation stored per ply: the mover's next two moves and change (ADR 0008). */
+export const PLY_PV_LIMIT = 6;
+
+/**
+ * What the engine's search said about a ply, kept so the tutor can explain it without searching
+ * again (docs/adr/0008-computed-tutor-and-learn-mode.md). Every number the tutor states comes
+ * from here.
+ */
+export interface PlyFacts {
+  /** The evaluation after the move, White's perspective, like every stored evaluation. */
+  scoreCp: number | null;
+  mateIn: number | null;
+  /** The engine's continuation after the move, in UCI, at most `PLY_PV_LIMIT` plies. */
+  pv: string[];
+  /**
+   * This move's score minus the best *other* move's at the same node, from the mover's side.
+   * Large and positive: the only good move. Near zero: one of several. Negative: a branch reply
+   * that far behind the engine's first choice. Null with no runner-up, or across a mate score.
+   */
+  gapCp: number | null;
+}
+
 export interface LinePly {
   /** 1-based from the start position. */
   ply: number;
@@ -44,6 +66,8 @@ export interface LinePly {
   uci: string;
   fenBefore: string;
   source: LineMoveSource;
+  /** Null on the root, which is never searched, and on lines stored before ADR 0008. */
+  facts: PlyFacts | null;
 }
 
 /**
@@ -85,6 +109,8 @@ export interface RankedMove {
   uci: string;
   scoreCp: number | null;
   mateIn: number | null;
+  /** The principal variation, starting with this move. */
+  pv?: readonly string[];
 }
 
 /**
@@ -111,6 +137,9 @@ export const PONZIANI: LineSpec = {
   depthPlies: LINE_DEPTH_PLIES,
   branching: PONZIANI_BRANCHING,
 };
+
+/** Moves asked of the engine at every node: the one played, and the one it is measured against. */
+const MIN_RANKED = 2;
 
 /** Far outside any centipawn score, so every mate sorts beyond every material edge. */
 const MATE_SCORE = 100_000;
@@ -143,6 +172,38 @@ export function selectReplies(ranked: readonly RankedMove[], rule: BranchRule): 
 }
 
 /**
+ * The facts to store with `uci`, played by `mover`, from the node's ranked moves. Null when the
+ * engine did not rank that move. Scores arrive from the side to move and are stored from White's.
+ */
+export function plyFacts(
+  ranked: readonly RankedMove[],
+  uci: string,
+  mover: Color,
+): PlyFacts | null {
+  const move = ranked.find((m) => m.uci === uci);
+  if (!move) return null;
+
+  const others = ranked.filter((m) => m.uci !== uci);
+  const runnerUp = others.reduce<RankedMove | null>(
+    (best, m) => (best === null || moveScore(m) > moveScore(best) ? m : best),
+    null,
+  );
+  // A mate is not a distance in centipawns; saying "the next best is 99,980 worse" would be false.
+  const gapCp =
+    runnerUp && move.mateIn === null && runnerUp.mateIn === null
+      ? (move.scoreCp ?? 0) - (runnerUp.scoreCp ?? 0)
+      : null;
+
+  const flip = (n: number | null): number | null => (n === null || mover === 'w' ? n : -n || 0);
+  return {
+    scoreCp: flip(move.scoreCp),
+    mateIn: flip(move.mateIn),
+    pv: (move.pv ?? []).slice(1, 1 + PLY_PV_LIMIT),
+    gapCp,
+  };
+}
+
+/**
  * A line's identity: the learner's colour and its moves. Transpositions are deliberately not
  * folded together — a line is drilled from move one, so its move order is what is learnt.
  */
@@ -156,7 +217,7 @@ export function lineKey(learnerColor: Color, ucis: readonly string[]): string {
  * book at the same place are still told apart.
  */
 export function nameLine(
-  plies: readonly LinePly[],
+  plies: readonly Pick<LinePly, 'ply' | 'san' | 'source'>[],
   book: OpeningBook,
   fallback: { eco: string; name: string },
 ): { eco: string; name: string } {
@@ -222,7 +283,7 @@ export async function generateLines(
   const board = new Chess();
   const plies: LinePly[] = [];
 
-  const push = (uci: string, source: LineMoveSource): void => {
+  const push = (uci: string, source: LineMoveSource, facts: PlyFacts | null): void => {
     const fenBefore = board.fen();
     let move;
     try {
@@ -241,6 +302,7 @@ export async function generateLines(
       uci: uciOf(move),
       fenBefore,
       source,
+      facts,
     });
   };
 
@@ -253,7 +315,9 @@ export async function generateLines(
     // A line ends on the learner's move; trim an opponent move left dangling by a game ending.
     let length = plies.length;
     while (length > 0 && plies[length - 1]!.color !== spec.learnerColor) length -= 1;
-    const kept = plies.slice(0, length).map((p) => ({ ...p }));
+    const kept = plies
+      .slice(0, length)
+      .map((p) => ({ ...p, facts: p.facts && { ...p.facts, pv: [...p.facts.pv] } }));
     if (kept.length <= spec.rootSan.length) return;
 
     const { eco, name } = nameLine(kept, deps.book, spec);
@@ -280,31 +344,35 @@ export async function generateLines(
     if (index < spec.rootSan.length) {
       const move = board.move(spec.rootSan[index]!);
       board.undo();
-      push(uciOf(move), 'opening');
+      push(uciOf(move), 'opening', null);
       await walk(opponentDecisions);
       pop();
       return;
     }
 
+    // Every search asks for at least two moves, though White plays one: the runner-up's score is
+    // what `gapCp` measures against, and it exists only inside this search (ADR 0008).
     const fen = board.fen();
-    if (board.turn() === spec.learnerColor) {
-      const [best] = await rank(fen, 1);
+    const mover = board.turn();
+    if (mover === spec.learnerColor) {
+      const ranked = await rank(fen, MIN_RANKED);
+      const [best] = ranked;
       if (!best) return emit();
-      push(best.uci, 'engine');
+      push(best.uci, 'engine', plyFacts(ranked, best.uci, mover));
       await walk(opponentDecisions);
       pop();
       return;
     }
 
     const rule = spec.branching[opponentDecisions];
-    const ranked = await rank(fen, Math.max(1, rule?.maxReplies ?? 1));
+    const ranked = await rank(fen, Math.max(MIN_RANKED, rule?.maxReplies ?? 1));
     const replies = rule ? selectReplies(ranked, rule) : ranked.slice(0, 1).map((m) => m.uci);
     if (replies.length === 0) return emit();
 
     // A node where only the best reply survived the margin is not a branch; the engine chose.
     const source: LineMoveSource = replies.length > 1 ? 'branch' : 'engine';
     for (const uci of replies) {
-      push(uci, source);
+      push(uci, source, plyFacts(ranked, uci, mover));
       await walk(opponentDecisions + 1);
       pop();
     }

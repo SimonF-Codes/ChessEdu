@@ -179,6 +179,7 @@ export class Engine {
       uci: info.pv[0]!,
       scoreCp: info.scoreCp,
       mateIn: info.mateIn,
+      pv: info.pv,
     }));
   }
 

@@ -28,7 +28,7 @@ Deployed as a **live website** with Google sign-in and a verified Chess.com acco
 | Analysis worker | Long-running Node service on Fly.io driving Stockfish over UCI | Needs a persistent process, CPU, and a real filesystem for NNUE weights |
 | Browser engine | Stockfish 18 `lite`, **single-threaded** WASM, in a Web Worker | Instant hints and bot play without burning server CPU, and without the COOP/COEP headers a threaded build would need — see [ADR 0002](./adr/0002-browser-engine.md) |
 | Board UI | `chess.js` + `react-chessboard` | De-facto standard pair, well maintained |
-| Coaching LLM | Anthropic API (`claude-opus-5`), server-side | It explains; it never evaluates — see sections 6 and 7 |
+| Coaching LLM | Anthropic API (`claude-opus-5`), server-side | Game review only. It explains; it never evaluates — see sections 6 and 7. The opening tutor calls no model |
 | Tests | Vitest, plus Playwright for one smoke E2E | Fast unit/integration loop, thin browser layer |
 | CI/CD | GitHub Actions to Vercel (web) and Fly.io (worker) | See [ci-cd.md](./ci-cd.md) |
 
@@ -135,8 +135,28 @@ off `users` like everything else.
 
 ## 6. The coaching boundary
 
-**The engine evaluates. The LLM explains.** This is a hard architectural rule carried over
-from the idea note, and it is enforced structurally rather than by prompt discipline alone:
+**The engine evaluates. Nothing else does.** This is a hard architectural rule carried over from
+the idea note, and it is enforced structurally rather than by discipline alone. What explains the
+engine's output comes in two kinds, and each has its own half of the rule.
+
+**The tutor — computed, no model.** The opening tutor in Learn mode (§15,
+[ADR 0008](./adr/0008-computed-tutor-and-learn-mode.md)) makes no model call and no network call.
+An explanation is a pure function of the stored line: authored prose from
+`packages/chess/src/tutor/library.ts`, plus *motif detectors* run over the position and the
+engine facts stored on each ply.
+
+- **Any number in an explanation comes from stored engine output** — the ply's `scoreCp`,
+  `mateIn` or `gapCp`, written by the generator from a Stockfish search. Never from a template,
+  never from authored prose, never computed on a guess.
+- **Authored prose describes plans and ideas only** — qualitative claims a person can check against
+  the board. It asserts no evaluation, and a test keeps digits out of it.
+- **A detector that cannot substantiate its claim does not fire.** No stored facts means no engine
+  motif, not a default score.
+- **Outside the stored lines, the tutor says "I have not analysed that move."** It does not guess,
+  and that answer is a tested code path, not a fallback string.
+
+**The review coach — a model, given facts.** The game review coach (§13) calls the Anthropic API,
+and the model explains but never evaluates:
 
 - Every number a coaching response cites — centipawn loss, best move, accuracy, phase
   strength — is read from `move_analysis` / `game_analysis`, computed by Stockfish, and passed
@@ -145,6 +165,9 @@ from the idea note, and it is enforced structurally rather than by prompt discip
   engine line; explain the idea the player missed."
 - Reference-literature citations come from `corpus_chunks` retrieved via pgvector, so a claim
   about theory is attributable to a real source rather than recalled.
+
+In both, the check is the same: point at any number on the page and it traces back to a
+Stockfish search stored in Postgres.
 
 ## 7. The coaching endpoint
 
@@ -921,9 +944,43 @@ and `line_attempt` hang off `users` and every query on them is scoped by the ses
 attempt for a line id that does not exist records nothing. Drilled lines do **not** feed
 `/openings`, which stays a record of games actually played.
 
+**Engine facts are stored per ply.** Every ply the generator searched carries `facts`: the score
+after the move (`scoreCp` / `mateIn`, White's perspective), the engine's continuation after it
+(`pv`, UCI, at most `PLY_PV_LIMIT` = 6 plies), and `gapCp` — the move's score minus the best other
+move's at that node, from the mover's side. To have that runner-up, every searched node asks for at
+least two moves; White still plays the best. The root plies and lines stored before ADR 0008 have
+`facts: null`. They live in the `plies` jsonb; there is no column for them.
+
+**Learn mode.** `/lines/learn/{id}` walks a line forward and back without grading it, and explains
+every ply with the no-model tutor of §6 ([ADR 0008](./adr/0008-computed-tutor-and-learn-mode.md)):
+
+```mermaid
+flowchart LR
+    OL[("opening_line.plies<br/>san · fenBefore · source · facts")] --> MC["MoveContext<br/>position, move, facts, rest of line"]
+    MC --> DET["detectors<br/>positional + engine"]
+    DET --> EX["explainMove()<br/>top 3 by weight"]
+    LIB["library.ts<br/>authored plans"] --> EXL["explainLine() / plyNote()"]
+    OL --> TREE["buildLineTree()<br/>every stored line in the family"]
+    TREE --> ASK["askAboutMove()<br/>this line · another line · not analysed"]
+    EX --> UI["/lines/learn/{id}"]
+    EXL --> UI
+    ASK --> UI
+```
+
+- **It writes nothing.** No `line_attempt`, no `line_review`, no SM-2 — the route reads and its
+  client component has no server action. Learning is not measurement.
+- **What kind of move it is** is said from the ply's `source`: part of the opening's definition,
+  the engine's single choice, or one of *n* replies the engine rated close to its best (a
+  `branch`, *n* counted from the stored lines).
+- **Playing a different move on the board asks about it.** A move another stored line plays from
+  that position is explained and offered as a switch; anything else gets "I have not analysed that
+  move." and is taken back.
+- **Entry points.** The lines page lists every live line with *Learn* and *Drill*;
+  `/lines?line={id}` drills that line, graded or not by the same `isGradedAttempt` rule as any
+  other attempt. A line the learner has never attempted offers *Learn it first* above the board.
+
 **Not handled, deliberately.** Transpositions (a line is its move order), Black repertoires, other
-openings, and the coach explaining a missed move — the generator does not yet keep the engine's
-evaluation per ply, which that explanation would need as its given facts.
+openings, and the review coach explaining a missed drill move.
 
 ## 16. Open questions
 
