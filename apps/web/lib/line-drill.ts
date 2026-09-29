@@ -35,6 +35,7 @@ export const LINE_HISTORY_LIMIT = 10;
 export interface StoredLine {
   id: string;
   key: string;
+  family: string;
   eco: string;
   name: string;
   learnerColor: 'w' | 'b';
@@ -57,6 +58,7 @@ export interface LineQueue {
 const LINE_COLUMNS = {
   id: schema.openingLines.id,
   key: schema.openingLines.key,
+  family: schema.openingLines.family,
   eco: schema.openingLines.eco,
   name: schema.openingLines.name,
   learnerColor: schema.openingLines.learnerColor,
@@ -97,6 +99,7 @@ export async function loadLineQueue(input: {
       ? {
           id: next.id,
           key: next.key,
+          family: next.family,
           eco: next.eco,
           name: next.name,
           learnerColor: next.learnerColor,
@@ -121,6 +124,101 @@ export async function loadLine(input: {
     .where(eq(schema.openingLines.id, input.lineId))
     .limit(1);
   return row ?? null;
+}
+
+/** Line ids are UUIDs; anything else would be a Postgres error rather than "no such line". */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** A live line of the family, by id — for drilling a line the learner picked. Null otherwise. */
+export async function loadLiveLine(input: {
+  db: Database;
+  family: string;
+  lineId: string;
+}): Promise<StoredLine | null> {
+  if (!UUID.test(input.lineId)) return null;
+  const [row] = await input.db
+    .select(LINE_COLUMNS)
+    .from(schema.openingLines)
+    .where(
+      and(
+        eq(schema.openingLines.id, input.lineId),
+        eq(schema.openingLines.family, input.family),
+        isNull(schema.openingLines.retiredAt),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
+}
+
+export interface LineIndexEntry {
+  id: string;
+  eco: string;
+  name: string;
+  /** This user's next review, or null if they have never attempted the line. */
+  dueAt: Date | null;
+  attempted: boolean;
+}
+
+/** Every live line of the family, with this user's schedule for each — the lines index. */
+export async function loadLineIndex(input: {
+  db: Database;
+  userId: string;
+  family: string;
+}): Promise<LineIndexEntry[]> {
+  const rows = await input.db
+    .select({
+      id: schema.openingLines.id,
+      eco: schema.openingLines.eco,
+      name: schema.openingLines.name,
+      dueAt: schema.lineReviews.dueAt,
+    })
+    .from(schema.openingLines)
+    .leftJoin(
+      schema.lineReviews,
+      and(
+        eq(schema.lineReviews.lineId, schema.openingLines.id),
+        eq(schema.lineReviews.userId, input.userId),
+      ),
+    )
+    .where(and(eq(schema.openingLines.family, input.family), isNull(schema.openingLines.retiredAt)))
+    .orderBy(asc(schema.openingLines.name), asc(schema.openingLines.key));
+  // A line_review row is created by the first attempt, so its presence is "attempted".
+  return rows.map((row) => ({ ...row, attempted: row.dueAt !== null }));
+}
+
+export interface LearnView {
+  line: StoredLine;
+  /** Every live line of the same family, the line itself included: what the tutor knows. */
+  siblings: Pick<StoredLine, 'id' | 'name' | 'plies'>[];
+}
+
+/**
+ * What Learn mode reads: one live line and the rest of its family. Reads only — Learn mode writes
+ * no attempt and touches no schedule (docs/adr/0008-computed-tutor-and-learn-mode.md). Null for
+ * an unknown or retired line.
+ */
+export async function loadLearnView(input: {
+  db: Database;
+  lineId: string;
+}): Promise<LearnView | null> {
+  if (!UUID.test(input.lineId)) return null;
+  const [line] = await input.db
+    .select(LINE_COLUMNS)
+    .from(schema.openingLines)
+    .where(and(eq(schema.openingLines.id, input.lineId), isNull(schema.openingLines.retiredAt)))
+    .limit(1);
+  if (!line) return null;
+
+  const siblings = await input.db
+    .select({
+      id: schema.openingLines.id,
+      name: schema.openingLines.name,
+      plies: schema.openingLines.plies,
+    })
+    .from(schema.openingLines)
+    .where(and(eq(schema.openingLines.family, line.family), isNull(schema.openingLines.retiredAt)))
+    .orderBy(asc(schema.openingLines.key));
+  return { line, siblings };
 }
 
 export interface RecordedAttempt {

@@ -81,12 +81,17 @@ export function LineDrill({
   line,
   previous,
   queue,
+  picked = false,
 }: {
   line: DrillCard;
   previous: LineHistory;
   queue: { due: number; unseen: number; total: number };
+  /** Chosen from the index (`/lines?line=`) rather than served by the queue. */
+  picked?: boolean;
 }) {
   const router = useRouter();
+  // A picked line's URL names it, so refreshing would serve it again; go back to the queue.
+  const nextLine = () => (picked ? router.push('/lines') : router.refresh());
 
   /** Plies of the line already on the board. */
   const [played, setPlayed] = useState(0);
@@ -362,7 +367,7 @@ export function LineDrill({
               </button>
               <button
                 type="button"
-                onClick={() => router.refresh()}
+                onClick={nextLine}
                 className="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white dark:bg-white dark:text-neutral-900"
               >
                 Next line

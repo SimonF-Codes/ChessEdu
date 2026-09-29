@@ -5,7 +5,14 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { type PlyAttempt, type PlyResult, LAPSE_INTERVAL_DAYS } from '@chessedu/chess';
 import { type OpeningLinePly, createDatabase, schema } from '@chessedu/db';
 
-import { loadLineHistory, loadLineQueue, recordLineAttempt } from './line-drill';
+import {
+  loadLearnView,
+  loadLineHistory,
+  loadLineIndex,
+  loadLineQueue,
+  loadLiveLine,
+  recordLineAttempt,
+} from './line-drill';
 
 /**
  * Against real Postgres, as CONTRIBUTING.md requires: what is under test is the `user_id`
@@ -428,6 +435,92 @@ describe.skipIf(!connectionString)('line drill', () => {
       const queue = await loadLineQueue({ db, userId, family: FAMILY, now: NOW });
       expect(queue.next!.plies.map((p) => p.san)).toEqual(PONZIANI_D5);
       expect(queue.next!.learnerColor).toBe('w');
+    });
+  });
+
+  describe('Learn mode reads', () => {
+    const FACTS = { scoreCp: 20, mateIn: null, pv: ['d7d5', 'e4d5'], gapCp: 35 };
+
+    async function countWrites(): Promise<number> {
+      const [attempts, reviews] = await Promise.all([
+        db.select().from(schema.lineAttempts).where(eq(schema.lineAttempts.userId, userId)),
+        db.select().from(schema.lineReviews).where(eq(schema.lineReviews.userId, userId)),
+      ]);
+      return attempts.length + reviews.length;
+    }
+
+    it('loads a line with its engine facts, and the family’s other live lines for the tree', async () => {
+      const plies = pliesOf(PONZIANI_NF6).map((ply, index) =>
+        index === 6 ? { ...ply, source: 'engine' as const, facts: FACTS } : { ...ply, facts: null },
+      );
+      const withFacts = await makeLine(PONZIANI_NF6, { plies });
+      const retired = await makeLine(['e4', 'e5', 'Nf3', 'Nc6', 'c3', 'a6', 'd4'], {
+        retiredAt: NOW,
+      });
+      const elsewhere = await makeLine(PONZIANI_D5, { family: 'test-other-family' });
+
+      const view = await loadLearnView({ db, lineId: withFacts });
+      expect(view).not.toBeNull();
+      expect(view!.line).toMatchObject({ id: withFacts, family: FAMILY, learnerColor: 'w' });
+      expect(view!.line.plies[6]!.facts).toEqual(FACTS);
+      expect(view!.line.plies[0]!.facts).toBeNull();
+
+      const siblings = view!.siblings.map((line) => line.id);
+      expect(siblings).toEqual(expect.arrayContaining([lineId, withFacts]));
+      expect(siblings).not.toContain(retired);
+      expect(siblings).not.toContain(elsewhere);
+    });
+
+    it('treats a line stored before engine facts as having none', async () => {
+      const view = await loadLearnView({ db, lineId });
+      expect(view!.line.plies.every((ply) => (ply.facts ?? null) === null)).toBe(true);
+    });
+
+    it('has nothing to show for a retired line, an unknown id, or something that is not an id', async () => {
+      const retired = await makeLine(PONZIANI_NF6, { retiredAt: NOW });
+      expect(await loadLearnView({ db, lineId: retired })).toBeNull();
+      expect(await loadLearnView({ db, lineId: crypto.randomUUID() })).toBeNull();
+      expect(await loadLearnView({ db, lineId: 'not-a-uuid' })).toBeNull();
+    });
+
+    it('writes nothing — learning is not measurement', async () => {
+      const before = await countWrites();
+      await loadLearnView({ db, lineId });
+      await loadLineIndex({ db, userId, family: FAMILY });
+      expect(await countWrites()).toBe(before);
+      expect(before).toBe(0);
+    });
+
+    it('lists every live line with this user’s schedule, and only theirs', async () => {
+      const second = await makeLine(PONZIANI_NF6);
+      await recordLineAttempt({ db, userId, lineId, plies: attempt(CLEAN), now: NOW });
+      await recordLineAttempt({
+        db,
+        userId: otherUserId,
+        lineId: second,
+        plies: attempt(CLEAN),
+        now: NOW,
+      });
+
+      const index = await loadLineIndex({ db, userId, family: FAMILY });
+      expect(index.map((entry) => entry.id).sort()).toEqual([lineId, second].sort());
+      expect(index.find((entry) => entry.id === lineId)).toMatchObject({ attempted: true });
+      expect(index.find((entry) => entry.id === lineId)!.dueAt?.getTime()).toBe(
+        NOW.getTime() + DAY_MS,
+      );
+      expect(index.find((entry) => entry.id === second)).toMatchObject({
+        attempted: false,
+        dueAt: null,
+      });
+    });
+
+    it('finds a live line of the family to drill by id, and nothing else', async () => {
+      const retired = await makeLine(PONZIANI_NF6, { retiredAt: NOW });
+      const elsewhere = await makeLine(PONZIANI_D5, { family: 'test-other-family' });
+      expect((await loadLiveLine({ db, family: FAMILY, lineId }))?.id).toBe(lineId);
+      expect(await loadLiveLine({ db, family: FAMILY, lineId: retired })).toBeNull();
+      expect(await loadLiveLine({ db, family: FAMILY, lineId: elsewhere })).toBeNull();
+      expect(await loadLiveLine({ db, family: FAMILY, lineId: 'nope' })).toBeNull();
     });
   });
 });
