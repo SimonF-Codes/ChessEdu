@@ -15,6 +15,13 @@
       "when": 1790615519474,
       "tag": "0001_opening_line_drill",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790631160841,
+      "tag": "0002_line_attempt_graded",
+      "breakpoints": true
     }
   ]
 }

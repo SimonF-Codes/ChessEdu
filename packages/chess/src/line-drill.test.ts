@@ -6,6 +6,7 @@ import {
   type PlyAttempt,
   type PlyResult,
   MAX_PLY_ELAPSED_MS,
+  isGradedAttempt,
   learnerPlies,
   lineOutcome,
   plyLabel,
@@ -13,7 +14,7 @@ import {
   selectNextLine,
   summariseLineHistory,
 } from './line-drill';
-import { QUICK_SOLVE_MS } from './srs';
+import { INITIAL_SRS_STATE, OUTCOME_GRADES, QUICK_SOLVE_MS, gradeReview } from './srs';
 
 /** 1.e4 e5 2.Nf3 Nc6 3.c3 d5 4.Qa4 — White to learn: plies 1, 3, 5, 7. */
 const LINE: DrillLine = {
@@ -98,6 +99,54 @@ describe('lineOutcome — derived from the board, never self-reported', () => {
   });
 });
 
+describe('isGradedAttempt — only the attempt that meets a due line is graded (ADR 0007)', () => {
+  const NOW = new Date('2026-09-28T12:00:00Z');
+  const DAY_MS = 86_400_000;
+
+  it('grades the first attempt at a line never tried before', () => {
+    expect(isGradedAttempt(null, NOW)).toBe(true);
+  });
+
+  it('grades an attempt at a line that is due, or overdue', () => {
+    expect(isGradedAttempt(NOW, NOW)).toBe(true);
+    expect(isGradedAttempt(new Date(NOW.getTime() - 3 * DAY_MS), NOW)).toBe(true);
+  });
+
+  it('treats an attempt at a line scheduled for later as practice', () => {
+    expect(isGradedAttempt(new Date(NOW.getTime() + 1), NOW)).toBe(false);
+    expect(isGradedAttempt(new Date(NOW.getTime() + DAY_MS), NOW)).toBe(false);
+  });
+
+  it('cannot let replays upgrade a line: hard, then two clean replays, stays graded hard', () => {
+    // One sitting: a hard first attempt, then the learner replays it twice, cleanly and quickly.
+    let state = INITIAL_SRS_STATE;
+    let dueAt: Date | null = null;
+    const outcomes = [
+      lineOutcome(attempt(['first_try', 'second_try', 'first_try', 'first_try']), 4),
+      lineOutcome(clean(), 4),
+      lineOutcome(clean(), 4),
+    ];
+    const graded: string[] = [];
+    outcomes.forEach((outcome, index) => {
+      const now = new Date(NOW.getTime() + index * 60_000);
+      if (!isGradedAttempt(dueAt, now)) return;
+      graded.push(outcome);
+      const next = gradeReview(state, OUTCOME_GRADES[outcome], now);
+      state = next;
+      dueAt = next.dueAt;
+    });
+
+    expect(graded).toEqual(['hard']);
+    expect(state.ease).toBeLessThan(INITIAL_SRS_STATE.ease);
+  });
+
+  it('grades the next day’s attempt again, once the line has come due', () => {
+    const scheduled = gradeReview(INITIAL_SRS_STATE, OUTCOME_GRADES.again, NOW);
+    expect(isGradedAttempt(scheduled.dueAt, new Date(NOW.getTime() + 60_000))).toBe(false);
+    expect(isGradedAttempt(scheduled.dueAt, scheduled.dueAt)).toBe(true);
+  });
+});
+
 describe('normaliseAttempt', () => {
   it('accepts one entry per learner move, in order', () => {
     expect(normaliseAttempt(LINE, clean())).toEqual(clean());
@@ -137,10 +186,24 @@ describe('normaliseAttempt', () => {
 
 describe('summariseLineHistory', () => {
   const at = (day: number) => new Date(Date.UTC(2026, 8, day));
-  const record = (day: number, plies: PlyAttempt[]): LineAttemptRecord => ({
+  const record = (day: number, plies: PlyAttempt[], graded = true): LineAttemptRecord => ({
     attemptId: `a${day}`,
     attemptedAt: at(day),
+    graded,
     plies,
+  });
+
+  it('counts practice replays in the per-move record, and says how many there were', () => {
+    // A lapse, then two replays in the same sitting: the misses are the record, not noise.
+    const history = summariseLineHistory(LINE, [
+      record(5, attempt(['first_try', 'first_try', 'first_try', 'revealed']), false),
+      record(4, attempt(['first_try', 'first_try', 'first_try', 'second_try']), false),
+      record(3, attempt(['first_try', 'first_try', 'first_try', 'revealed'])),
+    ]);
+    expect(history.attempts).toBe(3);
+    expect(history.practice).toBe(2);
+    expect(history.plies.find((p) => p.ply === 7)!.missStreak).toBe(3);
+    expect(history.summary).toBe('First 3 moves clean — 4.Qa4 missed 3 times running.');
   });
 
   it('says so when the line has never been tried', () => {

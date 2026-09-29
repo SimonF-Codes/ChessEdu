@@ -57,12 +57,12 @@ async function main(): Promise<void> {
       let asked = 0;
       const lines = await generateLines(spec, {
         book,
-        chooseMove: async (fen) => {
+        rankMoves: async (fen, count) => {
           asked += 1;
           // A cleared hash makes the answer a function of the position alone, not of the order
           // positions happened to be asked in.
           await engine.newGame();
-          return (await engine.analyse(fen)).bestMoveUci;
+          return engine.rankMoves(fen, count);
         },
       });
 
@@ -74,7 +74,9 @@ async function main(): Promise<void> {
           .map((p) => (p.color === 'w' ? plyLabel(p.ply, p.san) : p.san))
           .join(' ');
         const sources = line.plies.map((p) => p.source[0]).join('');
-        console.log(`  ${line.eco} ${line.name}\n    ${moves}   [${sources}]`);
+        // Each searched ply's lead over the engine's next best, from the mover's side; `.` is none.
+        const gaps = line.plies.map((p) => p.facts?.gapCp ?? '.').join(' ');
+        console.log(`  ${line.eco} ${line.name}\n    ${moves}   [${sources}]\n    gap cp: ${gaps}`);
       }
 
       if (dryRun) continue;

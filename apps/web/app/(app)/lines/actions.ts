@@ -25,7 +25,15 @@ export interface LineAttemptReport {
 }
 
 export type RecordLineResult =
-  { ok: true; outcome: ReviewOutcome; intervalDays: number; history: LineHistory } | { ok: false };
+  | {
+      ok: true;
+      outcome: ReviewOutcome;
+      /** False for a practice replay: `outcome` was earned but not applied (ADR 0007). */
+      graded: boolean;
+      intervalDays: number;
+      history: LineHistory;
+    }
+  | { ok: false };
 
 export async function recordLineAttemptAction(
   report: LineAttemptReport,
@@ -52,6 +60,7 @@ export async function recordLineAttemptAction(
   return {
     ok: true,
     outcome: recorded.outcome,
+    graded: recorded.graded,
     intervalDays: recorded.scheduled.intervalDays,
     history: summariseLineHistory(line, attempts),
   };

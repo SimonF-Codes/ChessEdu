@@ -28,7 +28,7 @@ Deployed as a **live website** with Google sign-in and a verified Chess.com acco
 | Analysis worker | Long-running Node service on Fly.io driving Stockfish over UCI | Needs a persistent process, CPU, and a real filesystem for NNUE weights |
 | Browser engine | Stockfish 18 `lite`, **single-threaded** WASM, in a Web Worker | Instant hints and bot play without burning server CPU, and without the COOP/COEP headers a threaded build would need — see [ADR 0002](./adr/0002-browser-engine.md) |
 | Board UI | `chess.js` + `react-chessboard` | De-facto standard pair, well maintained |
-| Coaching LLM | Anthropic API (`claude-opus-5`), server-side | It explains; it never evaluates — see sections 6 and 7 |
+| Coaching LLM | Anthropic API (`claude-opus-5`), server-side | Game review only. It explains; it never evaluates — see sections 6 and 7. The opening tutor calls no model |
 | Tests | Vitest, plus Playwright for one smoke E2E | Fast unit/integration loop, thin browser layer |
 | CI/CD | GitHub Actions to Vercel (web) and Fly.io (worker) | See [ci-cd.md](./ci-cd.md) |
 
@@ -135,8 +135,28 @@ off `users` like everything else.
 
 ## 6. The coaching boundary
 
-**The engine evaluates. The LLM explains.** This is a hard architectural rule carried over
-from the idea note, and it is enforced structurally rather than by prompt discipline alone:
+**The engine evaluates. Nothing else does.** This is a hard architectural rule carried over from
+the idea note, and it is enforced structurally rather than by discipline alone. What explains the
+engine's output comes in two kinds, and each has its own half of the rule.
+
+**The tutor — computed, no model.** The opening tutor in Learn mode (§15,
+[ADR 0008](./adr/0008-computed-tutor-and-learn-mode.md)) makes no model call and no network call.
+An explanation is a pure function of the stored line: authored prose from
+`packages/chess/src/tutor/library.ts`, plus *motif detectors* run over the position and the
+engine facts stored on each ply.
+
+- **Any number in an explanation comes from stored engine output** — the ply's `scoreCp`,
+  `mateIn` or `gapCp`, written by the generator from a Stockfish search. Never from a template,
+  never from authored prose, never computed on a guess.
+- **Authored prose describes plans and ideas only** — qualitative claims a person can check against
+  the board. It asserts no evaluation, and a test keeps digits out of it.
+- **A detector that cannot substantiate its claim does not fire.** No stored facts means no engine
+  motif, not a default score.
+- **Outside the stored lines, the tutor says "I have not analysed that move."** It does not guess,
+  and that answer is a tested code path, not a fallback string.
+
+**The review coach — a model, given facts.** The game review coach (§13) calls the Anthropic API,
+and the model explains but never evaluates:
 
 - Every number a coaching response cites — centipawn loss, best move, accuracy, phase
   strength — is read from `move_analysis` / `game_analysis`, computed by Stockfish, and passed
@@ -145,6 +165,9 @@ from the idea note, and it is enforced structurally rather than by prompt discip
   engine line; explain the idea the player missed."
 - Reference-literature citations come from `corpus_chunks` retrieved via pgvector, so a claim
   about theory is attributable to a real source rather than recalled.
+
+In both, the check is the same: point at any number on the page and it traces back to a
+Stockfish search stored in Postgres.
 
 ## 7. The coaching endpoint
 
@@ -849,29 +872,36 @@ real, a `move_commentary` table is the obvious next step.
 The repertoire (§11) shows the lines a player has played. The line drill teaches ones they have
 not: a fixed sequence, repeated move by move until it is automatic, with a record of **where** it
 breaks. First and only opening so far: the Ponziani (C44, `1.e4 e5 2.Nf3 Nc6 3.c3`), learner as
-White. The decisions and what lost are in [ADR 0006](./adr/0006-opening-line-drill.md).
+White. The decisions and what lost are in [ADR 0006](./adr/0006-opening-line-drill.md) and
+[ADR 0007](./adr/0007-line-coverage-and-replay.md), which replaced 0006's branching rule and added
+replay.
 
 ```mermaid
 flowchart LR
-    ECO[("ECO book<br/>defaultBook()")] -->|"Black's branches"| GEN["generateLines()<br/>packages/chess/src/lines.ts"]
-    SF["Stockfish<br/>apps/worker Engine"] -->|"White's move<br/>at every node"| GEN
+    ECO[("ECO book<br/>defaultBook()")] -->|"names only"| GEN["generateLines()<br/>packages/chess/src/lines.ts"]
+    SF["Stockfish MultiPV<br/>apps/worker Engine"] -->|"White: best move<br/>Black: replies near best"| GEN
     GEN --> SCRIPT["lines/generate.ts<br/>(run by hand)"]
     SCRIPT --> OL[("opening_line")]
     OL --> Q["lib/line-drill.ts<br/>next line, scoped by user"]
     LR2[("line_review<br/>SM-2 state")] --> Q
     Q --> UI["/lines<br/>chess.js + react-chessboard"]
     UI -->|"per-ply results"| A["recordLineAttemptAction"]
-    A -->|"lineOutcome()"| SRS["srs.ts<br/>gradeReview"]
+    A -->|"lineOutcome(),<br/>only if isGradedAttempt()"| SRS["srs.ts<br/>gradeReview"]
     A --> LA[("line_attempt<br/>one row per ply")]
     SRS --> LR2
     LA -->|"summariseLineHistory()"| UI
 ```
 
 **Who chooses the moves.** Inside the root the opening's own definition does. After it, White's
-move at every node is **Stockfish's best move**; Black **branches on every ECO continuation** for
-its first `LINE_BRANCH_DECISIONS` (2) decisions and plays Stockfish's move after that. Lines are
-`LINE_DEPTH_PLIES` (11) long, so each ends on the learner's move. The model plays no part: which
-move is right is an evaluation, and §6 gives evaluations to the engine.
+move at every node is **Stockfish's best move** — one answer per position. Black **branches on the
+replies Stockfish rates within a margin of its best**, capped per decision (`selectReplies`,
+`PONZIANI_BRANCHING`: up to 6 within 100 cp at `3.c3`, up to 3 within 50 cp at the next decision),
+and plays Stockfish's single best move after that. For the Ponziani that is 15 lines, including
+`3...d6` and `3...a6`, which ECO does not name. The ECO book only **names** a line: the deepest
+named position it passes, plus any branch choices after it (`Ponziani Opening · 3...a6, 4...d6`).
+Lines are `LINE_DEPTH_PLIES` (11) long, so each ends on the learner's move, and every line is
+drilled from move one, shared prefix included. The model plays no part: which move is right is an
+evaluation, and §6 gives evaluations to the engine.
 
 **Generation is a script, not a job.** `npm run lines:generate --workspace @chessedu/worker`
 replays the tree against the worker's `Engine` at a fixed depth and upserts into `opening_line`,
@@ -885,8 +915,10 @@ never tried. The learner plays White; Black's reply from the stored line is play
 |---|---|
 | plays the line's move | accepts it, plays Black's reply |
 | plays another legal move, first time | rejects it — "not that one" — one more try |
-| plays another legal move, second time, or presses *Show me* | plays the right move, names it, continues |
+| plays another legal move, second time, or presses *Show me* | plays the right move, names it, takes it back; the learner must play it to continue (recorded as revealed) |
 | presses *Stop* | reveals the rest; every remaining ply is recorded as abandoned |
+| presses *Start again* (offered once a move has gone wrong) | records this attempt with the rest abandoned, and restarts from move one |
+| presses *Try this line again* (at the end) | restarts from move one as a new attempt |
 
 A wrong move never ends the line — the moves after it are exactly the ones worth drilling.
 
@@ -895,19 +927,60 @@ A wrong move never ends the line — the moves after it are exactly the ones wor
 `good`, and all first try inside `QUICK_SOLVE_MS` each is `easy` — and `gradeReview` from
 `srs.ts`, unchanged, schedules the line. There is no rating button.
 
+**Replays are practice.** Only the attempt that meets a line which is due, or never tried, is
+graded (`isGradedAttempt`, decided under the `line_review` row lock). Grading pushes the due date
+at least a day out, so every replay after it is recorded with `graded = false` and leaves the
+schedule alone: a line solved cleanly on the third go cannot upgrade the first go's `hard`. The
+practice outcome is still shown to the learner, marked as such.
+
 **The history is per ply.** One `line_attempt` row per learner move per attempt, carrying the
-result, the wrong moves tried and the time taken. `summariseLineHistory` reads the recent ones back
-into "first 3 moves clean — 5.d4 missed 3 times running"; there is no summary column to disagree
-with the rows.
+result, the wrong moves tried, the time taken and whether it was graded. A replay is a new
+attempt, never an edit of the last. `summariseLineHistory` reads the recent ones back — practice
+included, since missing a move again on the replay is the pattern it is for — into "first 3 moves
+clean — 5.d4 missed 3 times running"; there is no summary column to disagree with the rows.
 
 **Ownership.** `opening_line` is a catalogue with no owner, the same for every user. `line_review`
 and `line_attempt` hang off `users` and every query on them is scoped by the session user; an
 attempt for a line id that does not exist records nothing. Drilled lines do **not** feed
 `/openings`, which stays a record of games actually played.
 
+**Engine facts are stored per ply.** Every ply the generator searched carries `facts`: the score
+after the move (`scoreCp` / `mateIn`, White's perspective), the engine's continuation after it
+(`pv`, UCI, at most `PLY_PV_LIMIT` = 6 plies), and `gapCp` — the move's score minus the best other
+move's at that node, from the mover's side. To have that runner-up, every searched node asks for at
+least two moves; White still plays the best. The root plies and lines stored before ADR 0008 have
+`facts: null`. They live in the `plies` jsonb; there is no column for them.
+
+**Learn mode.** `/lines/learn/{id}` walks a line forward and back without grading it, and explains
+every ply with the no-model tutor of §6 ([ADR 0008](./adr/0008-computed-tutor-and-learn-mode.md)):
+
+```mermaid
+flowchart LR
+    OL[("opening_line.plies<br/>san · fenBefore · source · facts")] --> MC["MoveContext<br/>position, move, facts, rest of line"]
+    MC --> DET["detectors<br/>positional + engine"]
+    DET --> EX["explainMove()<br/>top 3 by weight"]
+    LIB["library.ts<br/>authored plans"] --> EXL["explainLine() / plyNote()"]
+    OL --> TREE["buildLineTree()<br/>every stored line in the family"]
+    TREE --> ASK["askAboutMove()<br/>this line · another line · not analysed"]
+    EX --> UI["/lines/learn/{id}"]
+    EXL --> UI
+    ASK --> UI
+```
+
+- **It writes nothing.** No `line_attempt`, no `line_review`, no SM-2 — the route reads and its
+  client component has no server action. Learning is not measurement.
+- **What kind of move it is** is said from the ply's `source`: part of the opening's definition,
+  the engine's single choice, or one of *n* replies the engine rated close to its best (a
+  `branch`, *n* counted from the stored lines).
+- **Playing a different move on the board asks about it.** A move another stored line plays from
+  that position is explained and offered as a switch; anything else gets "I have not analysed that
+  move." and is taken back.
+- **Entry points.** The lines page lists every live line with *Learn* and *Drill*;
+  `/lines?line={id}` drills that line, graded or not by the same `isGradedAttempt` rule as any
+  other attempt. A line the learner has never attempted offers *Learn it first* above the board.
+
 **Not handled, deliberately.** Transpositions (a line is its move order), Black repertoires, other
-openings, and the coach explaining a missed move — the generator does not yet keep the engine's
-evaluation per ply, which that explanation would need as its given facts.
+openings, and the review coach explaining a missed drill move.
 
 ## 16. Open questions
 

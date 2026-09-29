@@ -4,6 +4,8 @@ import { createInterface } from 'node:readline';
 import {
   type EngineInfo,
   type Evaluation,
+  type RankedMove,
+  finalVariations,
   parseBestMove,
   parseInfoLine,
   sideToMove,
@@ -123,13 +125,62 @@ export class Engine {
       this.send(this.goCommand());
     });
 
-    const info: EngineInfo = best ?? { depth: 0, scoreCp: 0, mateIn: null, pv: [] };
+    const info: EngineInfo = best ?? { depth: 0, scoreCp: 0, mateIn: null, pv: [], multipv: 1 };
     return {
       evaluation: toWhitePerspective(info, sideToMove(fen)),
       bestMoveUci: bestMove,
       pv: info.pv,
       depth: info.depth,
     };
+  }
+
+  /**
+   * The `count` best moves in a position, best first, each scored from the side to move — a
+   * MultiPV search. MultiPV is set back to one afterwards, so `analyse` is never slowed by it.
+   */
+  async rankMoves(fen: string, count: number): Promise<RankedMove[]> {
+    this.send(`setoption name MultiPV value ${count}`);
+    this.send(`position fen ${fen}`);
+
+    const infos: EngineInfo[] = [];
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(
+          () => {
+            cleanup();
+            reject(new Error(`engine timed out ranking ${fen}`));
+          },
+          (this.options.moveTimeMs ?? 1000) * 5 * count + 10_000,
+        );
+
+        const listener = (line: string) => {
+          const info = parseInfoLine(line);
+          if (info) infos.push(info);
+          if (line.startsWith('bestmove')) {
+            cleanup();
+            resolve();
+          }
+        };
+
+        const cleanup = () => {
+          clearTimeout(timer);
+          this.lines = this.lines.filter((l) => l !== listener);
+        };
+
+        this.lines.push(listener);
+        this.send(this.goCommand());
+      });
+    } finally {
+      this.send('setoption name MultiPV value 1');
+      await this.isReady();
+    }
+
+    return finalVariations(infos).map((info) => ({
+      uci: info.pv[0]!,
+      scoreCp: info.scoreCp,
+      mateIn: info.mateIn,
+      pv: info.pv,
+    }));
   }
 
   private goCommand(): string {

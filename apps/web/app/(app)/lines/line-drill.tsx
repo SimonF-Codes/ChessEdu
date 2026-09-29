@@ -1,6 +1,6 @@
 'use client';
 
-import { Chess } from 'chess.js';
+import { Chess, type Square } from 'chess.js';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Chessboard } from 'react-chessboard';
@@ -19,8 +19,9 @@ import { type RecordLineResult, recordLineAttemptAction } from './actions';
  * Drilling one opening line, move by move.
  *
  * The learner plays their side; the opponent's reply from the stored line is played straight
- * back. A wrong move gets one retry, then the right move is played for them, named, and the line
- * carries on — ending it would throw away every move after the slip (ADR 0006, question 3).
+ * back. A wrong move gets one retry; after a second, or "Show me", the right move is played,
+ * taken back, and the learner must play it themselves before the line carries on (ADR 0007,
+ * reopening ADR 0006 question 3). The line is always completed.
  *
  * The component records what happened on each move and nothing else. It never grades: the
  * server derives the outcome from these per-move results.
@@ -36,6 +37,9 @@ export interface DrillCard {
 
 /** How long the opponent's reply waits before appearing, so it reads as a move. */
 const REPLY_DELAY_MS = 350;
+
+/** How long a revealed move stays on the board before it is taken back for the learner to play. */
+const SHOW_MOVE_MS = 900;
 
 const OUTCOME_LABELS: Record<ReviewOutcome, string> = {
   again: 'Not there yet',
@@ -62,6 +66,10 @@ function applyUci(game: Chess, uci: string): void {
   game.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci.slice(4) || undefined });
 }
 
+function daysLabel(days: number): string {
+  return `${days} ${days === 1 ? 'day' : 'days'}`;
+}
+
 /** The position after the first `count` plies of the line. */
 function positionAfter(line: DrillCard, count: number): string {
   const game = new Chess();
@@ -73,12 +81,17 @@ export function LineDrill({
   line,
   previous,
   queue,
+  picked = false,
 }: {
   line: DrillCard;
   previous: LineHistory;
   queue: { due: number; unseen: number; total: number };
+  /** Chosen from the index (`/lines?line=`) rather than served by the queue. */
+  picked?: boolean;
 }) {
   const router = useRouter();
+  // A picked line's URL names it, so refreshing would serve it again; go back to the queue.
+  const nextLine = () => (picked ? router.push('/lines') : router.refresh());
 
   /** Plies of the line already on the board. */
   const [played, setPlayed] = useState(0);
@@ -87,21 +100,55 @@ export function LineDrill({
   const [message, setMessage] = useState<string | null>(null);
   const [status, setStatus] = useState<'playing' | 'saving' | 'done'>('playing');
   const [report, setReport] = useState<RecordLineResult | null>(null);
+  /** The record as of the last attempt saved here, so it stays current across replays. */
+  const [history, setHistory] = useState(previous);
+  /**
+   * Set once the current move has been revealed: what the record will say about it, frozen at
+   * the moment of the reveal. The line does not move on until the learner plays the move
+   * themselves (ADR 0007, replacing ADR 0006 question 3's "played for them").
+   */
+  const [shown, setShown] = useState<{ elapsedMs: number; wrongUci: string[] } | null>(null);
+  /** While true the revealed move is on the board; then it is taken back for the learner. */
+  const [demonstrating, setDemonstrating] = useState(false);
   const turnStartedAt = useRef(Date.now());
 
-  const position = positionAfter(line, played);
+  const position = positionAfter(line, demonstrating ? played + 1 : played);
   const next = line.plies[played];
-  const learnerToMove = status === 'playing' && next?.color === line.learnerColor;
+  const learnerToMove = status === 'playing' && !demonstrating && next?.color === line.learnerColor;
   const orientation = line.learnerColor === 'w' ? 'white' : 'black';
+  /** Something has gone wrong in this attempt, so starting over mid-line is worth offering. */
+  const slipped =
+    shown !== null || wrong.length > 0 || results.some((r) => r.result !== 'first_try');
 
+  /** Back to move one for a fresh attempt. The one before it is already recorded. */
+  const reset = useCallback(() => {
+    setPlayed(0);
+    setResults([]);
+    setWrong([]);
+    setShown(null);
+    setDemonstrating(false);
+    setMessage(null);
+    setReport(null);
+    setStatus('playing');
+  }, []);
+
+  /**
+   * Record the attempt, then either show how it went or — for a restart — go straight back to
+   * move one. Every attempt is its own record; a replay never replaces the one before (ADR 0007).
+   */
   const finish = useCallback(
-    async (all: PlyAttempt[]) => {
+    async (all: PlyAttempt[], then: 'report' | 'replay' = 'report') => {
       setStatus('saving');
       const result = await recordLineAttemptAction({ lineId: line.id, plies: all });
+      if (result.ok) setHistory(result.history);
+      if (then === 'replay') {
+        reset();
+        return;
+      }
       setReport(result);
       setStatus('done');
     },
-    [line.id],
+    [line.id, reset],
   );
 
   // The opponent's moves play themselves, whether at the start of a line or after each reply.
@@ -121,21 +168,51 @@ export function LineDrill({
 
   /** Close out the learner's current move and move on to the opponent's reply. */
   const complete = useCallback(
-    (result: PlyResult, wrongUci: string[]) => {
+    (result: PlyResult, wrongUci: string[], elapsedMs = Date.now() - turnStartedAt.current) => {
       if (!next) return;
-      setResults((all) => [
-        ...all,
-        { ply: next.ply, result, elapsedMs: Date.now() - turnStartedAt.current, wrongUci },
-      ]);
+      setResults((all) => [...all, { ply: next.ply, result, elapsedMs, wrongUci }]);
       setWrong([]);
+      setShown(null);
       setPlayed((count) => count + 1);
     },
     [next],
   );
 
+  /**
+   * Reveal the move: play it, take it back, and wait for the learner to play it. It is recorded
+   * as `revealed` whatever happens next — finding it now is copying, not recall.
+   */
+  const showMove = useCallback(
+    (tried: string[]) => {
+      if (!next) return;
+      setShown({ elapsedMs: Date.now() - turnStartedAt.current, wrongUci: tried });
+      setWrong([]);
+      setDemonstrating(true);
+      setMessage(`The move is ${plyLabel(next.ply, next.san)}. Now you play it.`);
+    },
+    [next],
+  );
+
+  // A revealed move stays on the board just long enough to be seen, then is taken back.
+  useEffect(() => {
+    if (!demonstrating) return;
+    const timer = setTimeout(() => setDemonstrating(false), SHOW_MOVE_MS);
+    return () => clearTimeout(timer);
+  }, [demonstrating]);
+
   const onDrop = useCallback(
     (from: string, to: string): boolean => {
       if (!learnerToMove || !next) return false;
+      if (shown) {
+        // After a reveal, only the move itself moves the line on; nothing more is recorded.
+        if (`${from}${to}` !== next.uci.slice(0, 4)) {
+          setMessage(`Not that — play ${plyLabel(next.ply, next.san)}.`);
+          return false;
+        }
+        setMessage(null);
+        complete('revealed', shown.wrongUci, shown.elapsedMs);
+        return true;
+      }
 
       const game = new Chess(position);
       let move;
@@ -160,37 +237,39 @@ export function LineDrill({
         return false;
       }
 
-      setMessage(`The move was ${plyLabel(next.ply, next.san)}. Carry on from there.`);
-      complete('revealed', tried);
+      showMove(tried);
       return false;
     },
-    [complete, learnerToMove, next, position, wrong],
+    [complete, learnerToMove, next, position, showMove, shown, wrong],
   );
 
   const reveal = useCallback(() => {
-    if (!learnerToMove || !next) return;
-    setMessage(`The move was ${plyLabel(next.ply, next.san)}. Carry on from there.`);
-    complete('revealed', wrong);
-  }, [complete, learnerToMove, next, wrong]);
+    if (!learnerToMove || !next || shown) return;
+    showMove(wrong);
+  }, [learnerToMove, next, showMove, shown, wrong]);
 
-  /** Stop here: the move in hand and every one after it are recorded as abandoned. */
-  const stop = useCallback(() => {
-    if (status !== 'playing') return;
-    const remaining = line.plies
-      .slice(played)
-      .filter((ply) => ply.color === line.learnerColor)
-      .map((ply, index) => ({
-        ply: ply.ply,
-        result: 'abandoned' as const,
-        elapsedMs: index === 0 ? Date.now() - turnStartedAt.current : 0,
-        wrongUci: index === 0 ? wrong : [],
-      }));
-    setPlayed(line.plies.length);
-    setMessage(null);
-    void finish([...results, ...remaining]);
-  }, [finish, line.learnerColor, line.plies, played, results, status, wrong]);
-
-  const shownHistory = report?.ok ? report.history : previous;
+  /**
+   * Stop here: the move in hand and every one after it are recorded as abandoned. Then either
+   * show the result, or — "Start again" — begin a new attempt at once.
+   */
+  const stop = useCallback(
+    (then: 'report' | 'replay' = 'report') => {
+      if (status !== 'playing') return;
+      const remaining = line.plies
+        .slice(played)
+        .filter((ply) => ply.color === line.learnerColor)
+        .map((ply, index) => ({
+          ply: ply.ply,
+          result: 'abandoned' as const,
+          elapsedMs: index === 0 ? Date.now() - turnStartedAt.current : 0,
+          wrongUci: index === 0 ? (shown?.wrongUci ?? wrong) : [],
+        }));
+      setPlayed(line.plies.length);
+      setMessage(null);
+      void finish([...results, ...remaining], then);
+    },
+    [finish, line.learnerColor, line.plies, played, results, shown, status, wrong],
+  );
 
   return (
     <div className="flex flex-col gap-6 lg:flex-row">
@@ -201,6 +280,11 @@ export function LineDrill({
           onPieceDrop={onDrop}
           boardOrientation={orientation}
           arePiecesDraggable={learnerToMove}
+          customArrows={
+            shown && !demonstrating && next
+              ? [[next.uci.slice(0, 2) as Square, next.uci.slice(2, 4) as Square]]
+              : []
+          }
           animationDuration={200}
         />
       </div>
@@ -233,14 +317,23 @@ export function LineDrill({
               <button
                 type="button"
                 onClick={reveal}
-                disabled={!learnerToMove}
+                disabled={!learnerToMove || shown !== null}
                 className="rounded-lg border border-neutral-300 px-4 py-2 text-sm font-medium disabled:opacity-50 dark:border-neutral-700"
               >
                 Show me
               </button>
+              {slipped ? (
+                <button
+                  type="button"
+                  onClick={() => stop('replay')}
+                  className="rounded-lg border border-neutral-300 px-4 py-2 text-sm font-medium dark:border-neutral-700"
+                >
+                  Start again
+                </button>
+              ) : null}
               <button
                 type="button"
-                onClick={stop}
+                onClick={() => stop()}
                 className="rounded-lg px-4 py-2 text-sm text-neutral-500 hover:underline"
               >
                 Stop
@@ -253,24 +346,37 @@ export function LineDrill({
           <div className="space-y-3">
             {message ? <p className="text-neutral-600 dark:text-neutral-400">{message}</p> : null}
             <p className="font-medium">
-              {report?.ok ? OUTCOME_LABELS[report.outcome] : 'This attempt could not be recorded.'}
+              {report?.ok
+                ? `${report.graded ? '' : 'Practice — '}${OUTCOME_LABELS[report.outcome]}`
+                : 'This attempt could not be recorded.'}
             </p>
             {report?.ok ? (
               <p className="text-neutral-500">
-                Back in {report.intervalDays} {report.intervalDays === 1 ? 'day' : 'days'}.
+                {report.graded
+                  ? `Back in ${daysLabel(report.intervalDays)}.`
+                  : `Not graded — the first run set the schedule, still back in ${daysLabel(report.intervalDays)}.`}
               </p>
             ) : null}
-            <button
-              type="button"
-              onClick={() => router.refresh()}
-              className="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white dark:bg-white dark:text-neutral-900"
-            >
-              Next line
-            </button>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={reset}
+                className="rounded-lg border border-neutral-300 px-4 py-2 text-sm font-medium dark:border-neutral-700"
+              >
+                Try this line again
+              </button>
+              <button
+                type="button"
+                onClick={nextLine}
+                className="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white dark:bg-white dark:text-neutral-900"
+              >
+                Next line
+              </button>
+            </div>
           </div>
         )}
 
-        <HistoryPanel history={shownHistory} />
+        <HistoryPanel history={history} />
       </aside>
     </div>
   );
@@ -282,6 +388,11 @@ function HistoryPanel({ history }: { history: LineHistory }) {
     <div className="space-y-2 border-t border-neutral-200 pt-4 dark:border-neutral-800">
       <p className="font-medium">Your record on this line</p>
       <p className="text-neutral-600 dark:text-neutral-400">{history.summary}</p>
+      {history.practice > 0 ? (
+        <p className="text-xs text-neutral-500">
+          Last {history.attempts} runs, {history.practice} of them practice replays.
+        </p>
+      ) : null}
       {history.attempts > 0 ? (
         <table className="w-full text-left text-xs">
           <thead className="text-neutral-500">

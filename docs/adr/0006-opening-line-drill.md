@@ -4,7 +4,9 @@ status: stable
 
 # ADR 0006: Opening line drill — ECO branches for the opponent, Stockfish for the learner
 
-- **Status:** accepted
+- **Status:** accepted; the Black branching rule (the table row below and question 2) is
+  superseded, and question 3 reopened, by [ADR 0007](./0007-line-coverage-and-replay.md), which
+  also adds replay.
 - **Date:** 2026-09-28
 
 ## Context
@@ -31,6 +33,11 @@ Constraints:
 ## Decision
 
 ### Lines are generated, not authored
+
+> **Amended by ADR 0007.** Black no longer branches on ECO continuations: it branches on the
+> replies Stockfish rates within a margin of its best, capped per decision, and the book only
+> names lines. The engine seam is now `rankMoves(fen, count)` (MultiPV). The rest of this section
+> stands.
 
 `generateLines` in `packages/chess/src/lines.ts` walks a tree from a fixed root and emits every
 leaf as a line:
@@ -59,6 +66,9 @@ move**. A line that ends on the opponent's reply leaves the learner nothing to r
 of it — the last thing they see would be a move they did not have to find. Six White moves,
 three of them past the root.
 
+> **Superseded by ADR 0007.** The ECO filter missed `3...a6`, the one reply the player had actually
+> faced. The text below is kept as the record of what was decided and why it was replaced.
+
 **2. Which Black replies: every named ECO reply at Black's first two decisions after `3.c3`,
 Stockfish's reply after that** (`LINE_BRANCH_DECISIONS = 2`). The first reply to `3.c3` is the
 point of the opening — `3...d5`, `3...Nf6`, `3...f5`, `3...Be7`, `3...Nge7` are each a different
@@ -70,6 +80,11 @@ player has met": broader than their history, because the drill exists to cover w
 not seen, and narrower than the book, because depth-first coverage of named sidelines is not
 what a 550 player needs. What it cannot do is rank replies by how often they are _played_; that
 needs the Lichess explorer, which is ADR 0003's revisit trigger.
+
+> **Reopened by ADR 0007.** The choice here was framed as "end the line" or "play the move for
+> them and continue". A third option keeps what this answer protects — the line is always
+> completed and every ply recorded — and adds what it lost: the revealed move is played, taken
+> back, and the learner plays it with their own hands before the line continues.
 
 **3. A wrong move is corrected, and the line continues.** First wrong move: "not that one", try
 again. Second wrong move, or "Show me": the correct move is played on the board, named in text,

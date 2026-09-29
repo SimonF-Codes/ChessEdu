@@ -1,7 +1,7 @@
 import { eq, like } from 'drizzle-orm';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 
-import type { GeneratedLine } from '@chessedu/chess';
+import type { GeneratedLine, PlyFacts } from '@chessedu/chess';
 import { createDatabase, schema } from '@chessedu/db';
 
 import { saveGeneratedLines } from './store';
@@ -30,10 +30,38 @@ function line(key: string, name = 'Ponziani Opening'): GeneratedLine {
         uci: 'e2e4',
         fenBefore: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
         source: 'opening',
+        facts: null,
       },
     ],
   };
 }
+
+/** A line whose second ply was searched, carrying the facts the tutor reads (ADR 0008). */
+function searchedLine(key: string, facts: PlyFacts | null): GeneratedLine {
+  const base = line(key);
+  return {
+    ...base,
+    plies: [
+      ...base.plies,
+      {
+        ply: 2,
+        color: 'b',
+        san: 'd5',
+        uci: 'd7d5',
+        fenBefore: 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1',
+        source: 'branch',
+        facts,
+      },
+    ],
+  };
+}
+
+const FACTS: PlyFacts = {
+  scoreCp: -14,
+  mateIn: null,
+  pv: ['e4d5', 'd8d5', 'b1c3', 'd5a5', 'd2d4', 'g8f6'],
+  gapCp: -7,
+};
 
 describe.skipIf(!connectionString)('saveGeneratedLines', () => {
   const db = createDatabase(connectionString!, { max: 2 });
@@ -117,6 +145,95 @@ describe.skipIf(!connectionString)('saveGeneratedLines', () => {
     });
     stored = await rows();
     expect(stored.every((r) => r.retiredAt === null)).toBe(true);
+  });
+
+  it('keeps a retired line’s reviews and attempts — a re-run never orphans history', async () => {
+    await saveGeneratedLines({ db, family: FAMILY, lines: [line('a'), line('b')], engine: 'x' });
+    const b = (await rows()).find((r) => r.key.endsWith(':b'))!;
+    const email = `line-store-${Date.now()}@example.com`;
+    const [user] = await db
+      .insert(schema.users)
+      .values({ email })
+      .returning({ id: schema.users.id });
+    try {
+      await db.insert(schema.lineReviews).values({ userId: user!.id, lineId: b.id });
+      await db.insert(schema.lineAttempts).values({
+        attemptId: crypto.randomUUID(),
+        ply: 1,
+        userId: user!.id,
+        lineId: b.id,
+        result: 'first_try',
+        elapsedMs: 1_000,
+      });
+
+      await saveGeneratedLines({ db, family: FAMILY, lines: [line('a')], engine: 'x', now: LATER });
+
+      const retired = (await rows()).find((r) => r.id === b.id)!;
+      expect(retired.retiredAt?.getTime()).toBe(LATER.getTime());
+      const reviews = await db
+        .select()
+        .from(schema.lineReviews)
+        .where(eq(schema.lineReviews.lineId, b.id));
+      const attempts = await db
+        .select()
+        .from(schema.lineAttempts)
+        .where(eq(schema.lineAttempts.lineId, b.id));
+      expect(reviews).toHaveLength(1);
+      expect(attempts).toHaveLength(1);
+    } finally {
+      await db.delete(schema.users).where(eq(schema.users.id, user!.id));
+    }
+  });
+
+  it('round-trips every ply’s engine facts, and a root ply’s absence of them', async () => {
+    await saveGeneratedLines({
+      db,
+      family: FAMILY,
+      lines: [searchedLine('a', FACTS)],
+      engine: 'x',
+      now: NOW,
+    });
+    const [stored] = await rows();
+    expect(stored!.plies[0]!.facts).toBeNull();
+    expect(stored!.plies[1]!.facts).toEqual(FACTS);
+    // A negative gap and a null mate survive jsonb as numbers and nulls, not strings or absences.
+    expect(stored!.plies[1]!.facts!.gapCp).toBe(-7);
+    expect(stored!.plies[1]!.facts).toHaveProperty('mateIn', null);
+  });
+
+  it('fills in facts on a line stored without them, keeping its id and its history', async () => {
+    // A line as stored before ADR 0008: the same key, no facts on any ply.
+    const legacy = searchedLine('a', null);
+    await saveGeneratedLines({ db, family: FAMILY, lines: [legacy], engine: 'x', now: NOW });
+    const [before] = await rows();
+    const email = `line-store-facts-${Date.now()}@example.com`;
+    const [user] = await db
+      .insert(schema.users)
+      .values({ email })
+      .returning({ id: schema.users.id });
+    try {
+      await db.insert(schema.lineReviews).values({ userId: user!.id, lineId: before!.id });
+
+      await saveGeneratedLines({
+        db,
+        family: FAMILY,
+        lines: [searchedLine('a', FACTS)],
+        engine: 'y',
+        now: LATER,
+      });
+
+      const [after] = await rows();
+      expect(after!.id).toBe(before!.id);
+      expect(after!.retiredAt).toBeNull();
+      expect(after!.plies[1]!.facts).toEqual(FACTS);
+      const reviews = await db
+        .select()
+        .from(schema.lineReviews)
+        .where(eq(schema.lineReviews.lineId, before!.id));
+      expect(reviews).toHaveLength(1);
+    } finally {
+      await db.delete(schema.users).where(eq(schema.users.id, user!.id));
+    }
   });
 
   it('refuses an empty run rather than retiring the whole family', async () => {

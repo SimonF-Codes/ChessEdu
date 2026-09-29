@@ -102,6 +102,9 @@ which also keeps the credential off the command line.
 - **The engine evaluates; the LLM explains.** Never ask the model for an evaluation, a best
   move, or an accuracy number. Pass it Stockfish output as fact. This is the rule most likely
   to be broken by accident, and it is the one that makes the coaching trustworthy.
+  The opening tutor has no model at all: a number in its text comes from a ply's stored engine
+  facts, its authored prose states plans and never evaluations, and a detector that cannot
+  back its claim does not fire (§6, ADR 0008).
 - **Chess.com requests are serial**, conditional, and carry a descriptive `User-Agent`.
 
 ## Definition of done
