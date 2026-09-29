@@ -16,12 +16,12 @@ surface to speak on, and walking a line with nothing said about it is just an an
 
 The drill (ADR 0006, 0007) is graded from the first move. A line never seen before is presented
 as a memory test the learner is certain to fail, and failing it is what schedules it. At 550 the
-lesson is rarely the move itself — it is *why* `3.c3` was played so that `4.d4` could follow.
+lesson is rarely the move itself — it is _why_ `3.c3` was played so that `4.d4` could follow.
 
 What was on hand:
 
 - **The engine already computed every number an explanation needs, and threw them away.**
-  `rankMoves(fen, count)` returns a score for each of the top *n* moves; `generateLines` used the
+  `rankMoves(fen, count)` returns a score for each of the top _n_ moves; `generateLines` used the
   scores to pick and filter moves and stored only the move.
 - **§6's rule assumed a model.** "The engine evaluates. The LLM explains." The review coach
   (§13) is built on that. The tutor is asked for without the second half.
@@ -35,11 +35,11 @@ What was on hand:
 
 Three layers, and only the middle one is new code of any size:
 
-| Layer | Answers | Source | Where |
-|---|---|---|---|
-| Authored library | *why this line* | hand-written prose, reviewed in a PR | `packages/chess/src/tutor/library.ts` |
-| Motif detectors | *why this move* | the position (chess.js) and the stored engine facts | `packages/chess/src/tutor/detectors.ts` |
-| Learn mode | where it is read | — | `/lines/learn/[id]` |
+| Layer            | Answers          | Source                                              | Where                                   |
+| ---------------- | ---------------- | --------------------------------------------------- | --------------------------------------- |
+| Authored library | _why this line_  | hand-written prose, reviewed in a PR                | `packages/chess/src/tutor/library.ts`   |
+| Motif detectors  | _why this move_  | the position (chess.js) and the stored engine facts | `packages/chess/src/tutor/detectors.ts` |
+| Learn mode       | where it is read | —                                                   | `/lines/learn/[id]`                     |
 
 A **motif** is a pure function of a `MoveContext` — the position before the move, the move, the
 ply's stored engine facts, and the line's remaining plies — that either fires with a short clause
@@ -65,11 +65,11 @@ the two ways explanation is allowed to happen on top of it.
 
 `LinePly` gains `facts: PlyFacts | null`:
 
-| Field | Meaning |
-|---|---|
+| Field               | Meaning                                                                                        |
+| ------------------- | ---------------------------------------------------------------------------------------------- |
 | `scoreCp`, `mateIn` | the evaluation after the move, **from White's perspective** like every other stored evaluation |
-| `pv` | the engine's continuation *after* the move, in UCI, **at most `PLY_PV_LIMIT` (6) plies** |
-| `gapCp` | the move's score minus the best *other* move's at the same node, from the mover's side |
+| `pv`                | the engine's continuation _after_ the move, in UCI, **at most `PLY_PV_LIMIT` (6) plies**       |
+| `gapCp`             | the move's score minus the best _other_ move's at the same node, from the mover's side         |
 
 `gapCp` is the one that must be captured during the search: the runner-up's score exists only in
 that MultiPV result. It separates "the only move" (large positive) from "one of several" (near
@@ -96,19 +96,19 @@ adding an unused column to satisfy the word "migration" would be worse than none
 
 `/lines/learn/[id]` steps forward and back through a line — board and move list in sync — with an
 explanation panel: the line's authored idea, the current ply's authored note if it has one, what
-kind of move it is (the opening's definition, the engine's single best, or one of *n* replies the
+kind of move it is (the opening's definition, the engine's single best, or one of _n_ replies the
 engine rated close to its best), and its rendered motifs.
 
 It **writes nothing** — no `line_attempt`, no `line_review`, no SM-2. The page is a server
 component that reads, and a client component with no server action. Learning is not measurement,
 and a learn pass counted as an attempt would pollute the history that answers "how often do I fail
-here". The drill is unchanged beside it; the lines page lists every line with *Learn* and *Drill*,
-and offers *Learn it first* on a line the learner has never attempted.
+here". The drill is unchanged beside it; the lines page lists every line with _Learn_ and _Drill_,
+and offers _Learn it first_ on a line the learner has never attempted.
 
 ### The knowledge boundary is a code path
 
-The tutor answers a fixed set of questions: *what is this line about*, *why this move*, and *what
-about this other move?* — the last by playing a move on the Learn board. The answer to that comes
+The tutor answers a fixed set of questions: _what is this line about_, _why this move_, and _what
+about this other move?_ — the last by playing a move on the Learn board. The answer to that comes
 from `askAboutMove(tree, fen, uci)` over every stored line in the family:
 
 - the move is the one this line plays: explain it;
@@ -163,7 +163,7 @@ shows the motifs alone; the missing entry is a tested path, not an error.
 - **Old rows have no facts** until the generator runs again; the tutor says less about them rather
   than anything false.
 - **Detectors are heuristics, not an engine.** "Attacks the knight" is true of the board; it does
-  not claim the attack matters. The engine detectors are the ones that say something is *good*,
+  not claim the attack matters. The engine detectors are the ones that say something is _good_,
   and they only restate stored scores.
 - **The library is Ponziani-only.** A second opening is a new family entry. A line in a family with
   no entry still gets its motifs.
