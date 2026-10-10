@@ -30,6 +30,9 @@ const ENGINE_FILE = 'stockfish-18-lite-single';
  * SHA-256 of each file as published in the stockfish@18.0.8 npm tarball. The CDN is a
  * convenience; these hashes are what actually decides whether the bytes are trusted, because
  * this code runs in the user's tab.
+ *
+ * `from` is the path inside the package. It defaults to `bin/<name>`, where the engine build
+ * lives; the licence sits at the package root, so it names its own.
  */
 const FILES = [
   {
@@ -40,13 +43,22 @@ const FILES = [
     name: `${ENGINE_FILE}.wasm`,
     sha256: 'a8fbc05ec6920b56d7485826dcb02c5ffd2826bcbf751cf973046f237a9096f1',
   },
+  {
+    // Stockfish is GPL-3.0-or-later and we serve its binary to every visitor, so its licence is
+    // served beside it at /engines/Copying.txt. Fetched rather than committed for the same
+    // reason as the engine, and hash-pinned for the same reason too. See NOTICE.md.
+    name: 'Copying.txt',
+    from: 'Copying.txt',
+    sha256: '0b383d5a63da644f628d99c33976ea6487ed89aaa59f0b3257992deac1171e6b',
+  },
 ];
 
 const here = dirname(fileURLToPath(import.meta.url));
 const destination = join(here, '..', 'apps', 'web', 'public', 'engines');
 
 /** jsDelivr refuses this package (it is over their 150 MB size limit); unpkg serves it. */
-const urlFor = (name) => `https://unpkg.com/stockfish@${ENGINE_VERSION}/bin/${name}`;
+const urlFor = (file) =>
+  `https://unpkg.com/stockfish@${ENGINE_VERSION}/${file.from ?? `bin/${file.name}`}`;
 
 const digest = (buffer) => createHash('sha256').update(buffer).digest('hex');
 
@@ -58,7 +70,8 @@ async function alreadyGood(path, expected) {
   }
 }
 
-async function fetchOne({ name, sha256 }) {
+async function fetchOne(file) {
+  const { name, sha256 } = file;
   const path = join(destination, name);
 
   if (await alreadyGood(path, sha256)) {
@@ -66,7 +79,7 @@ async function fetchOne({ name, sha256 }) {
     return;
   }
 
-  const url = urlFor(name);
+  const url = urlFor(file);
   console.log(`[engine] downloading ${url}`);
   const response = await fetch(url);
   if (!response.ok) {
@@ -95,7 +108,7 @@ async function fetchOne({ name, sha256 }) {
 
 async function main() {
   await mkdir(destination, { recursive: true });
-  // Serial: two requests, and a clear log beats a fast one.
+  // Serial: a handful of requests, and a clear log beats a fast one.
   for (const file of FILES) await fetchOne(file);
 }
 

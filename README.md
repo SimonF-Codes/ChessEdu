@@ -82,3 +82,15 @@ repertoire, the review coach, browser play against Stockfish, and the reference 
 workflows fail on every push, which is expected rather than broken. No real Chess.com account
 has ever been synced either, so everything above is verified against fixtures and a CI
 database. See [docs/status.md](docs/status.md) for what live actually needs.
+
+## Licence and credits
+
+ChessEdu is [MIT licensed](LICENSE).
+
+It stands on other people's work — most visibly **[Stockfish](https://stockfishchess.org/)**,
+which does all the evaluating, and the **[Lichess ECO data](https://github.com/lichess-org/chess-openings)**,
+which supplies opening names. Stockfish is GPL-3.0; ChessEdu does not link it, bundle it or
+redistribute it in source form — the browser build is fetched at build time, hash-verified and
+served as a standalone asset with its own licence beside it at `/engines/Copying.txt`.
+
+Full attribution, licences and how each component reaches a user: **[NOTICE.md](NOTICE.md)**.
