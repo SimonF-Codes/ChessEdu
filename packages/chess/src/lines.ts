@@ -31,10 +31,17 @@ export const LINE_DEPTH_PLIES = 11;
  * - `opening`: the root, the opening's definition.
  * - `engine`: the engine's single choice at that node.
  * - `branch`: one of several opponent replies the engine rated close enough to its best to drill.
+ * - `games`: an opponent reply the player has faced often enough in their own games, and the
+ *   engine did not veto (docs/adr/0009-openings-from-the-games.md).
  * - `book`: an ECO continuation. Lines generated before ADR 0007 branched on the book, and their
  *   stored plies still say so. No run produces it now.
  */
-export type LineMoveSource = 'opening' | 'engine' | 'branch' | 'book';
+export type LineMoveSource = 'opening' | 'engine' | 'branch' | 'games' | 'book';
+
+/** A line ends on the learner's move: 11 plies for White, one more for Black. */
+export function lineDepthFor(learnerColor: Color): number {
+  return learnerColor === 'w' ? LINE_DEPTH_PLIES : LINE_DEPTH_PLIES + 1;
+}
 
 /** The longest continuation stored per ply: the mover's next two moves and change (ADR 0008). */
 export const PLY_PV_LIMIT = 6;
@@ -116,8 +123,30 @@ export interface RankedMove {
 /**
  * The engine's `count` best moves for a position, best first, scored for the side to move — UCI
  * MultiPV. Fewer when the position has fewer legal moves; empty when it has none.
+ *
+ * With `only`, the search is restricted to those moves (UCI `searchmoves`), so a move far down
+ * the engine's list can still be scored at the same depth as the rest.
  */
-export type RankMoves = (fen: string, count: number) => Promise<RankedMove[]>;
+export type RankMoves = (
+  fen: string,
+  count: number,
+  only?: readonly string[],
+) => Promise<RankedMove[]>;
+
+/**
+ * How often the player's opponents chose each move, by position (`positionKey`) and then UCI,
+ * counted over the player's games on the learner's side (ADR 0009).
+ */
+export type FacedReplies = ReadonlyMap<string, ReadonlyMap<string, number>>;
+
+/** A reply faced fewer times than this is an anecdote, not a measurement. */
+export const FACED_MIN_GAMES = 5;
+
+/**
+ * A faced reply more than this far below the engine's best is vetoed: a popular reply that
+ * simply loses is not theory, and drilling it would teach the learner to expect a gift.
+ */
+export const FACED_VETO_CP = 150;
 
 /**
  * The opponent's branching for the Ponziani (ADR 0007): up to six replies within a pawn of the
@@ -169,6 +198,61 @@ export function selectReplies(ranked: readonly RankedMove[], rule: BranchRule): 
     .filter((move) => best - move.score <= rule.marginCp)
     .slice(0, rule.maxReplies)
     .map((move) => move.uci);
+}
+
+/** An opponent reply chosen at a node, and whether the player's games chose it. */
+export interface ChosenReply {
+  uci: string;
+  measured: boolean;
+}
+
+/**
+ * The opponent replies to drill at one node, the player's games first (ADR 0009):
+ *
+ * 1. replies faced at least `minGames` times, most frequent first, unless the engine scores them
+ *    more than `vetoCp` below its best — or has not scored them, so cannot vouch for them;
+ * 2. then, while the rule's cap has room, `selectReplies` — ADR 0007's margin rule.
+ *
+ * Past the branching rules (`rule` undefined) the node has one reply: the most-faced one that
+ * survives the veto, else the engine's best. With nothing faced this is `selectReplies` exactly.
+ */
+export function chooseReplies(input: {
+  ranked: readonly RankedMove[];
+  faced: ReadonlyMap<string, number> | undefined;
+  rule: BranchRule | undefined;
+  minGames?: number;
+  vetoCp?: number;
+}): ChosenReply[] {
+  const { ranked, rule } = input;
+  if (ranked.length === 0) return [];
+  const minGames = input.minGames ?? FACED_MIN_GAMES;
+  const vetoCp = input.vetoCp ?? FACED_VETO_CP;
+  const cap = rule ? rule.maxReplies : 1;
+  if (cap < 1) return [];
+
+  const scoreOf = new Map(ranked.map((move) => [move.uci, moveScore(move)]));
+  const best = Math.max(...scoreOf.values());
+  const measured = [...(input.faced ?? [])]
+    .filter(([uci, games]) => {
+      const score = scoreOf.get(uci);
+      return games >= minGames && score !== undefined && best - score <= vetoCp;
+    })
+    .sort(
+      ([a, gamesA], [b, gamesB]) =>
+        gamesB - gamesA || scoreOf.get(b)! - scoreOf.get(a)! || (a < b ? -1 : a > b ? 1 : 0),
+    )
+    .slice(0, cap)
+    .map(([uci]) => ({ uci, measured: true }));
+
+  const taken = new Set(measured.map((reply) => reply.uci));
+  const fill = rule
+    ? selectReplies(ranked, rule)
+    : selectReplies(ranked, { maxReplies: 1, marginCp: 0 });
+  const filled = fill
+    .filter((uci) => !taken.has(uci))
+    .slice(0, cap - measured.length)
+    .map((uci) => ({ uci, measured: false }));
+  return [...measured, ...filled];
 }
 
 /**
@@ -236,7 +320,7 @@ export function nameLine(
   }
 
   const choices = plies
-    .filter((ply) => ply.source === 'branch' && ply.ply > namedAt)
+    .filter((ply) => (ply.source === 'branch' || ply.source === 'games') && ply.ply > namedAt)
     .map((ply) => plyLabel(ply.ply, ply.san));
   return { eco, name: choices.length > 0 ? `${name} · ${choices.join(', ')}` : name };
 }
@@ -253,10 +337,13 @@ function colorAt(plies: number): Color {
 /**
  * Walk the tree and return every line, in a stable order: depth first, the opponent's replies
  * best first. Each distinct position is put to the engine once per breadth asked of it.
+ *
+ * With `faced`, the opponent's replies are the player's measured ones first, vetted by the
+ * engine (`chooseReplies`, ADR 0009); without it, the walk is ADR 0007's exactly.
  */
 export async function generateLines(
   spec: LineSpec,
-  deps: { book: OpeningBook; rankMoves: RankMoves },
+  deps: { book: OpeningBook; rankMoves: RankMoves; faced?: FacedReplies },
 ): Promise<GeneratedLine[]> {
   if (colorAt(spec.depthPlies - 1) !== spec.learnerColor) {
     throw new Error(
@@ -269,11 +356,11 @@ export async function generateLines(
   for (const san of spec.rootSan) probe.move(san);
 
   const cache = new Map<string, Promise<RankedMove[]>>();
-  const rank = (fen: string, count: number): Promise<RankedMove[]> => {
-    const key = `${positionKey(fen)}|${count}`;
+  const rank = (fen: string, count: number, only?: readonly string[]): Promise<RankedMove[]> => {
+    const key = `${positionKey(fen)}|${count}|${only?.join(',') ?? ''}`;
     let pending = cache.get(key);
     if (!pending) {
-      pending = deps.rankMoves(fen, count);
+      pending = deps.rankMoves(fen, count, only);
       cache.set(key, pending);
     }
     return pending;
@@ -365,13 +452,24 @@ export async function generateLines(
     }
 
     const rule = spec.branching[opponentDecisions];
-    const ranked = await rank(fen, Math.max(MIN_RANKED, rule?.maxReplies ?? 1));
-    const replies = rule ? selectReplies(ranked, rule) : ranked.slice(0, 1).map((m) => m.uci);
+    const top = await rank(fen, Math.max(MIN_RANKED, rule?.maxReplies ?? 1));
+
+    // A reply the player has faced may sit below the engine's top few; score it too, so the veto
+    // is applied to every measured reply and not only to the ones that happened to rank high.
+    const faced = deps.faced?.get(positionKey(fen));
+    const unscored = [...(faced ?? [])]
+      .filter(([uci, games]) => games >= FACED_MIN_GAMES && !top.some((m) => m.uci === uci))
+      .map(([uci]) => uci)
+      .sort();
+    const ranked =
+      unscored.length > 0 ? [...top, ...(await rank(fen, unscored.length, unscored))] : top;
+
+    const replies = chooseReplies({ ranked, faced, rule });
     if (replies.length === 0) return emit();
 
     // A node where only the best reply survived the margin is not a branch; the engine chose.
-    const source: LineMoveSource = replies.length > 1 ? 'branch' : 'engine';
-    for (const uci of replies) {
+    for (const { uci, measured } of replies) {
+      const source: LineMoveSource = measured ? 'games' : replies.length > 1 ? 'branch' : 'engine';
       push(uci, source, plyFacts(ranked, uci, mover));
       await walk(opponentDecisions + 1);
       pop();

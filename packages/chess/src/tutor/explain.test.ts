@@ -106,9 +106,10 @@ describe('describeSource — a branch reply and an engine move are told apart', 
       describeSource({ source: 'engine', color: 'w' }, 'w'),
       describeSource({ source: 'engine', color: 'b' }, 'w'),
       describeSource({ source: 'branch', color: 'b' }, 'w'),
+      describeSource({ source: 'games', color: 'b' }, 'w'),
       describeSource({ source: 'book', color: 'b' }, 'w'),
     ]);
-    expect(texts.size).toBe(5);
+    expect(texts.size).toBe(6);
   });
 
   it('calls the learner’s engine move the repertoire’s one answer', () => {
@@ -119,6 +120,16 @@ describe('describeSource — a branch reply and an engine move are told apart', 
     expect(describeSource({ source: 'branch', color: 'b' }, 'w', 6)).toMatch(/^One of 6 replies/);
     expect(describeSource({ source: 'branch', color: 'b' }, 'w')).toMatch(/^One of several/);
     expect(describeSource({ source: 'branch', color: 'b' }, 'w', 1)).toMatch(/^One of several/);
+  });
+
+  it('says a reply from the player’s games came from them, and that the engine vetted it', () => {
+    const text = describeSource({ source: 'games', color: 'b' }, 'w', 5);
+    expect(text).toMatch(/^One of 5 replies/);
+    expect(text).toMatch(/your own opponents have played/);
+    expect(text).toMatch(/engine/);
+    expect(describeSource({ source: 'games', color: 'b' }, 'w')).toMatch(
+      /^A reply your own opponents/,
+    );
   });
 });
 
