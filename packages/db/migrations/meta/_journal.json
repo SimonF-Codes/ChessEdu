@@ -15,6 +15,13 @@
       "when": 1790615519474,
       "tag": "0001_opening_line_drill",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1791952114181,
+      "tag": "0003_job_dedupe_unfinished_only",
+      "breakpoints": true
     }
   ]
 }

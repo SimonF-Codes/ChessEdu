@@ -6,7 +6,14 @@ import { db, schema } from '@chessedu/db';
 
 import { requireUser } from '../../../lib/session';
 import { loadStrengthDashboard } from '../../../lib/strength';
+import {
+  describeSyncStatus,
+  loadAnalysisBacklog,
+  loadSyncStatus,
+  looksUnattended,
+} from '../../../lib/sync-status';
 import { StrengthPanel } from './strength-panel';
+import { SyncPanel } from './sync-panel';
 
 /**
  * The dashboard is the strength model: which phase of the game the player is actually losing
@@ -51,13 +58,16 @@ export default async function DashboardPage() {
   const dashboard = await loadStrengthDashboard(database, account.id);
 
   if (dashboard.games === 0) {
+    const status = await loadSyncStatus(database, account.id);
     return (
       <div className="max-w-xl space-y-4">
         <h1 className="text-2xl font-semibold tracking-tight">{account.username}</h1>
-        <p className="text-sm text-neutral-600 dark:text-neutral-400">
-          Sync queued. Your games will appear here as they are pulled in, and the engine starts on
-          each one as it lands.
-        </p>
+        <SyncPanel
+          status={status}
+          summary={describeSyncStatus(status, account.username)}
+          unattended={looksUnattended(status)}
+          backlog={await loadAnalysisBacklog(database)}
+        />
       </div>
     );
   }
