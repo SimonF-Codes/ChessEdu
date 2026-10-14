@@ -6,7 +6,9 @@ status: stable
 
 - **Status:** accepted. Amends [ADR 0006](./0006-opening-line-drill.md): replaces its answer to
   question 2 (which Black replies), reopens question 3 (what a revealed move does), and adds
-  replay, which it did not have.
+  replay, which it did not have. Its branching rule is amended by
+  [ADR 0009](./0009-openings-from-the-games.md): replies the player has faced come first, with the
+  engine as a veto.
 - **Date:** 2026-09-28
 
 ## Context
