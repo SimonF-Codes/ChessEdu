@@ -457,7 +457,19 @@ export const jobs = pgTable(
   },
   (table) => [
     index('job_claim_idx').on(table.state, table.runAfter, table.priority),
-    uniqueIndex('job_dedupe_idx').on(table.dedupeKey),
+    /**
+     * Deduplicate only among jobs that have not finished.
+     *
+     * This index used to cover every row. Because `completeJob` leaves the row in place with
+     * `state = 'done'`, a finished `ingest:<accountId>` sat in the table forever and silently
+     * swallowed — `enqueue` uses `onConflictDoNothing` — every later request to sync that
+     * account. The only way back was to unlink and relink.
+     *
+     * A dedupe key means "do not queue this twice at once", not "never do this again".
+     */
+    uniqueIndex('job_dedupe_idx')
+      .on(table.dedupeKey)
+      .where(sql`${table.state} in ('pending', 'running')`),
   ],
 );
 

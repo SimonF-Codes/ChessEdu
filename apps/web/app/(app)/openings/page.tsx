@@ -163,7 +163,7 @@ export default async function OpeningsPage() {
         <h1 className="text-2xl font-semibold tracking-tight">Openings</h1>
         <p className="text-sm text-neutral-500">
           {view.gameCount === 0
-            ? 'Sync queued. Your repertoire will appear here as games are pulled in.'
+            ? 'No games on file yet — the repertoire is built from them. The dashboard shows what the sync is doing.'
             : `Built from your ${view.gameCount} most recent games. Theory from the Lichess ECO data set.`}
         </p>
       </div>

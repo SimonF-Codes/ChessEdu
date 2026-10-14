@@ -41,7 +41,11 @@ export interface EnqueueOptions {
   kind: JobKind;
   payload: unknown;
   priority?: number;
-  /** Makes enqueueing idempotent — a second enqueue with the same key is a no-op. */
+  /**
+   * Makes enqueueing idempotent while the first copy is still outstanding — a second enqueue
+   * with the same key is a no-op until that job reaches `done` or `failed`. Asking for the same
+   * work again after it has finished does queue a new job.
+   */
   dedupeKey?: string;
   runAfter?: Date;
   maxAttempts?: number;
@@ -58,7 +62,14 @@ export async function enqueue(database: Database, options: EnqueueOptions): Prom
       runAfter: options.runAfter ?? new Date(),
       maxAttempts: options.maxAttempts ?? 3,
     })
-    .onConflictDoNothing({ target: jobs.dedupeKey });
+    // `job_dedupe_idx` is partial (migration 0003), so the predicate has to be repeated here:
+    // Postgres only infers a partial unique index when ON CONFLICT carries a matching WHERE.
+    // Without it this insert fails outright with "no unique or exclusion constraint matching
+    // the ON CONFLICT specification" — a loud failure rather than a silent one, but a failure.
+    .onConflictDoNothing({
+      target: jobs.dedupeKey,
+      where: sql`${jobs.state} in ('pending', 'running')`,
+    });
 }
 
 /**
