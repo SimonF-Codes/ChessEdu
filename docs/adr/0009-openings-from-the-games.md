@@ -156,8 +156,15 @@ tutor says where it came from.
 ### The Ponziani stays
 
 It is the pilot, it works, and retiring it would discard real review history. It is still the
-`PONZIANI` spec, generated with the measured families on every run. With four games there is no
-measured frequency for it, so its lines come out as ADR 0007 made them.
+`PONZIANI` spec, generated with the measured families on every run, and it keeps **ADR 0007's
+branching, without measured replies**.
+
+That is a choice, not an accident of the data. The "4 games" is the count under one Chess.com name;
+34 of the player's White games reach the position after `3.c3`, and Black replied `3...Nf6` 23
+times, `3...Bc5` 5, `3...d5` 3, `3...a6` 2. Under the measured rule `3...Bc5` would take a slot
+and `3...a6` would lose one: 13 lines instead of 15, and the two `3...a6` lines retired — the
+only two besides the Caro Gambit that the player has reviewed. Whether to switch the Ponziani to
+measured replies is left to the player; it is a one-line change in the generator.
 
 ### The drill shows every family
 

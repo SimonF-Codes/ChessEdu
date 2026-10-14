@@ -914,8 +914,8 @@ opponent's replies at a node are, first, **the ones the player has faced there**
 filled with **the replies Stockfish rates within a margin of its best** (`selectReplies`;
 `PONZIANI_BRANCHING` and `FAMILY_BRANCHING`: up to 6 within 100 cp at the first decision, up to 3
 within 50 cp at the next). Past those, the opponent plays its most-faced vetted reply, else
-Stockfish's best. For the Ponziani, with four games behind it, that is still 15 lines, including
-`3...d6` and `3...a6`, which ECO does not name. The ECO book only **names** a line: the deepest
+Stockfish's best. The Ponziani, the pilot, keeps margin-only branching so its reviewed lines stay
+live: 15 lines, including `3...d6` and `3...a6`, which ECO does not name. The ECO book only **names** a line: the deepest
 named position it passes, plus any branch choices after it (`Ponziani Opening · 3...a6, 4...d6`).
 Lines are `LINE_DEPTH_PLIES` (11) long for White and 12 for Black, so each ends on the learner's move, and every line is
 drilled from move one, shared prefix included. The model plays no part: which move is right is an
