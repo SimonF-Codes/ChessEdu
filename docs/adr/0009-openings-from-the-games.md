@@ -109,6 +109,20 @@ whether to drill it or play something else against 1.d4 is a preference this dat
 The lines exist so that the decision can be made after seeing them; the drill presents them like
 any other family.
 
+### What it generated, on 2026-10-14
+
+Stockfish at depth 20, one thread, hash cleared per position. Nothing was retired.
+
+| Family                  | Root           | Lines | The opponent's first decision                                                                                                                  |
+| ----------------------- | -------------- | ----: | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Englund Gambit, Black   | `1.d4 e5`      |     4 | `2.dxe5` (36 games) and `2.e3` (7) from the games; `2.d5` (5) vetoed by the engine; nothing else within a pawn of `2.dxe5`, so nothing filled. |
+| Scandinavian, Black     | `1.e4 d5`      |    15 | All six from the games: `2.exd5` 110, `2.e5` 85, `2.Nc3` 52, `2.Qf3` 22, `2.d3` 19, `2.f3` 18.                                                 |
+| Queen's Gambit, Black   | `1.d4 d5 2.c4` |    18 | Engine margin only. The learner's `2...e6` is the engine's, and few of the player's games reach it — they mostly played `2...dxc4`.            |
+| Ponziani, White (pilot) | unchanged      |    15 | ADR 0007's rule, unchanged; same 15 keys as before.                                                                                            |
+
+The Englund's four lines are what the rule gives when the engine rates one reply far above the rest
+and the player has met few others; that is a fact about the opening, not a gap in the generator.
+
 ### A family becomes a `LineSpec`; the shape does not change
 
 `familySpec` derives every field from the history:
