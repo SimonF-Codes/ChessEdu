@@ -7,6 +7,7 @@ import { type OpeningLinePly, createDatabase, schema } from '@chessedu/db';
 
 import {
   loadLearnView,
+  loadLineFamilies,
   loadLineHistory,
   loadLineIndex,
   loadLineQueue,
@@ -521,6 +522,39 @@ describe.skipIf(!connectionString)('line drill', () => {
       expect(await loadLiveLine({ db, family: FAMILY, lineId: retired })).toBeNull();
       expect(await loadLiveLine({ db, family: FAMILY, lineId: elsewhere })).toBeNull();
       expect(await loadLiveLine({ db, family: FAMILY, lineId: 'nope' })).toBeNull();
+    });
+  });
+
+  describe('loadLineFamilies', () => {
+    it('lists every family with live lines, its side, and what is due for this user', async () => {
+      const second = await makeLine(PONZIANI_NF6);
+      await makeLine(['e4', 'd5', 'exd5', 'Qxd5'], {
+        family: `${FAMILY}-black`,
+        learnerColor: 'b',
+        name: 'Scandinavian Defense',
+      });
+      await makeLine(['d4', 'e5', 'dxe5', 'Nc6'], {
+        family: `${FAMILY}-retired`,
+        learnerColor: 'b',
+        retiredAt: NOW,
+      });
+      await recordLineAttempt({
+        db,
+        userId,
+        lineId: second,
+        plies: attempt(['revealed', 'first_try', 'first_try', 'first_try']),
+        now: new Date(NOW.getTime() - 3 * DAY_MS),
+      });
+      // Another user's schedule changes nothing here.
+      await recordLineAttempt({ db, userId: otherUserId, lineId, plies: attempt(CLEAN), now: NOW });
+
+      const families = (await loadLineFamilies({ db, userId, now: NOW })).filter((f) =>
+        f.family.startsWith(FAMILY),
+      );
+      expect(families).toEqual([
+        { family: FAMILY, learnerColor: 'w', total: 2, due: 1, unseen: 1 },
+        { family: `${FAMILY}-black`, learnerColor: 'b', total: 1, due: 0, unseen: 1 },
+      ]);
     });
   });
 });
