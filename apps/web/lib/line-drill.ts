@@ -113,6 +113,58 @@ export async function loadLineQueue(input: {
   };
 }
 
+export interface LineFamily {
+  family: string;
+  learnerColor: 'w' | 'b';
+  /** Live lines in the family. */
+  total: number;
+  /** Lines this user has met that are due now. */
+  due: number;
+  /** Lines this user has never attempted. */
+  unseen: number;
+}
+
+/**
+ * Every family with live lines, by name, with this user's due and unseen counts — what `/lines`
+ * chooses a family from. The families come from the generator (ADR 0009), not from a constant.
+ */
+export async function loadLineFamilies(input: {
+  db: Database;
+  userId: string;
+  now?: Date;
+}): Promise<LineFamily[]> {
+  const now = input.now ?? new Date();
+  const rows = await input.db
+    .select({
+      family: schema.openingLines.family,
+      learnerColor: schema.openingLines.learnerColor,
+      dueAt: schema.lineReviews.dueAt,
+    })
+    .from(schema.openingLines)
+    .leftJoin(
+      schema.lineReviews,
+      and(
+        eq(schema.lineReviews.lineId, schema.openingLines.id),
+        eq(schema.lineReviews.userId, input.userId),
+      ),
+    )
+    .where(isNull(schema.openingLines.retiredAt))
+    .orderBy(asc(schema.openingLines.family));
+
+  const families = new Map<string, LineFamily>();
+  for (const row of rows) {
+    let entry = families.get(row.family);
+    if (!entry) {
+      entry = { family: row.family, learnerColor: row.learnerColor, total: 0, due: 0, unseen: 0 };
+      families.set(row.family, entry);
+    }
+    entry.total += 1;
+    if (row.dueAt === null) entry.unseen += 1;
+    else if (row.dueAt.getTime() <= now.getTime()) entry.due += 1;
+  }
+  return [...families.values()];
+}
+
 /** One line, whatever its state — for the history view of a line just drilled. */
 export async function loadLine(input: {
   db: Database;

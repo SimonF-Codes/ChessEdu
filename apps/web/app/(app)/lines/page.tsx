@@ -1,10 +1,12 @@
 import Link from 'next/link';
 
-import { PONZIANI, summariseLineHistory } from '@chessedu/chess';
+import { lineFamilyLabel, summariseLineHistory } from '@chessedu/chess';
 import { db } from '@chessedu/db';
 
 import {
+  type LineFamily,
   type LineIndexEntry,
+  loadLineFamilies,
   loadLineHistory,
   loadLineIndex,
   loadLineQueue,
@@ -17,8 +19,12 @@ export const metadata = { title: 'Lines — ChessEdu' };
 
 /**
  * Opening line repetition. Which line is next is the pure rule in packages/chess; the lines
- * themselves were chosen by Stockfish, the ECO book only naming them (ADR 0006, ADR 0007). This
- * page supplies the line and its history, and the board does the rest.
+ * themselves were chosen by Stockfish and the player's own games, the ECO book only naming them
+ * (ADR 0006, ADR 0007, ADR 0009). This page supplies the line and its history, and the board does
+ * the rest.
+ *
+ * `?family=<family>` picks which opening's lines; without it, the first family with a line due,
+ * else the first. The families are whatever the generator produced — no opening is named here.
  *
  * `?line=<id>` drills a line picked from the index instead of the queue's. Whether that attempt
  * is graded is decided exactly as for any other — by `isGradedAttempt`, on the server — so
@@ -28,37 +34,26 @@ export const metadata = { title: 'Lines — ChessEdu' };
 export default async function LinesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ line?: string }>;
+  searchParams: Promise<{ line?: string; family?: string }>;
 }) {
   const user = await requireUser();
   const database = db();
   const now = new Date();
-  const { line: pickedId } = await searchParams;
+  const { line: pickedId, family: requested } = await searchParams;
 
-  const [queue, index, picked] = await Promise.all([
-    loadLineQueue({ db: database, userId: user.id, family: PONZIANI.family, now }),
-    loadLineIndex({ db: database, userId: user.id, family: PONZIANI.family }),
-    pickedId
-      ? loadLiveLine({ db: database, family: PONZIANI.family, lineId: pickedId })
-      : Promise.resolve(null),
-  ]);
+  const families = await loadLineFamilies({ db: database, userId: user.id, now });
+  const current =
+    families.find((f) => f.family === requested) ??
+    families.find((f) => f.due > 0) ??
+    families[0] ??
+    null;
 
-  const intro = (
-    <div className="max-w-2xl space-y-2">
-      <h1 className="text-2xl font-semibold tracking-tight">Lines — the Ponziani</h1>
-      <p className="text-sm text-neutral-600 dark:text-neutral-400">
-        1.e4 e5 2.Nf3 Nc6 3.c3, as White. Black&apos;s replies are the ones Stockfish rates close to
-        its best, named or not; every White move after 3.c3 is Stockfish&apos;s. <em>Learn</em> a
-        line to walk through it with every move explained; <em>drill</em> it until it is automatic —
-        a wrong move is corrected and the line carries on, and you can run it again straight away.
-      </p>
-    </div>
-  );
-
-  if (queue.total === 0) {
+  if (!current) {
     return (
       <div className="space-y-6">
-        {intro}
+        <div className="max-w-2xl space-y-2">
+          <h1 className="text-2xl font-semibold tracking-tight">Lines</h1>
+        </div>
         <p className="max-w-2xl text-sm text-neutral-600 dark:text-neutral-400">
           No lines have been generated on this deployment yet. They are produced by{' '}
           <code className="font-mono">npm run lines:generate --workspace @chessedu/worker</code>.
@@ -66,6 +61,29 @@ export default async function LinesPage({
       </div>
     );
   }
+
+  const family = current.family;
+  const [queue, index, picked] = await Promise.all([
+    loadLineQueue({ db: database, userId: user.id, family, now }),
+    loadLineIndex({ db: database, userId: user.id, family }),
+    pickedId ? loadLiveLine({ db: database, family, lineId: pickedId }) : Promise.resolve(null),
+  ]);
+
+  const intro = (
+    <div className="max-w-2xl space-y-3">
+      <h1 className="text-2xl font-semibold tracking-tight">
+        Lines — {lineFamilyLabel(family, current.learnerColor)}
+      </h1>
+      <FamilyPicker families={families} current={family} />
+      <p className="text-sm text-neutral-600 dark:text-neutral-400">
+        Your opponent&apos;s replies are the ones played against you most often in your own games,
+        where Stockfish does not rate them as losing, and others Stockfish rates close to its best;
+        every move of yours after the opening&apos;s first moves is Stockfish&apos;s. <em>Learn</em>{' '}
+        a line to walk through it with every move explained; <em>drill</em> it until it is automatic
+        — a wrong move is corrected and the line carries on, and you can run it again straight away.
+      </p>
+    </div>
+  );
 
   const line = picked ?? queue.next;
 
@@ -93,7 +111,7 @@ export default async function LinesPage({
             See your repertoire
           </Link>
         </div>
-        <LineIndex lines={index} current={null} now={now} />
+        <LineIndex lines={index} current={null} family={family} now={now} />
       </div>
     );
   }
@@ -127,7 +145,7 @@ export default async function LinesPage({
         queue={{ due: queue.due, unseen: queue.unseen, total: queue.total }}
         picked={picked !== null}
       />
-      <LineIndex lines={index} current={line.id} now={now} />
+      <LineIndex lines={index} current={line.id} family={family} now={now} />
     </div>
   );
 }
@@ -138,14 +156,41 @@ function statusOf(entry: LineIndexEntry, now: Date): string {
   return `due ${entry.dueAt.toISOString().slice(0, 10)}`;
 }
 
-/** Every live line, each with Learn beside Drill. */
+/** The families with live lines, each with what is due in it. */
+function FamilyPicker({ families, current }: { families: LineFamily[]; current: string }) {
+  if (families.length < 2) return null;
+  return (
+    <nav className="flex flex-wrap gap-2 text-sm">
+      {families.map((f) => (
+        <Link
+          key={f.family}
+          href={`/lines?family=${encodeURIComponent(f.family)}`}
+          className={`rounded-lg border px-3 py-1 ${
+            f.family === current
+              ? 'border-neutral-900 font-medium dark:border-white'
+              : 'border-neutral-200 hover:border-neutral-400 dark:border-neutral-800'
+          }`}
+        >
+          {lineFamilyLabel(f.family, f.learnerColor)}
+          <span className="pl-2 text-xs text-neutral-500 tabular-nums">
+            {f.due > 0 ? `${f.due} due` : f.unseen > 0 ? `${f.unseen} new` : `${f.total}`}
+          </span>
+        </Link>
+      ))}
+    </nav>
+  );
+}
+
+/** Every live line of the family, each with Learn beside Drill. */
 function LineIndex({
   lines,
   current,
+  family,
   now,
 }: {
   lines: LineIndexEntry[];
   current: string | null;
+  family: string;
   now: Date;
 }) {
   return (
@@ -171,7 +216,10 @@ function LineIndex({
                   Learn
                 </Link>
                 <span className="px-2 text-neutral-300 dark:text-neutral-700">·</span>
-                <Link href={`/lines?line=${entry.id}`} className="font-medium hover:underline">
+                <Link
+                  href={`/lines?family=${encodeURIComponent(family)}&line=${entry.id}`}
+                  className="font-medium hover:underline"
+                >
                   Drill
                 </Link>
               </td>

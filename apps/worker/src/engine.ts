@@ -137,8 +137,9 @@ export class Engine {
   /**
    * The `count` best moves in a position, best first, each scored from the side to move — a
    * MultiPV search. MultiPV is set back to one afterwards, so `analyse` is never slowed by it.
+   * With `only`, the search is restricted to those moves (`searchmoves`), at the same depth.
    */
-  async rankMoves(fen: string, count: number): Promise<RankedMove[]> {
+  async rankMoves(fen: string, count: number, only?: readonly string[]): Promise<RankedMove[]> {
     this.send(`setoption name MultiPV value ${count}`);
     this.send(`position fen ${fen}`);
 
@@ -168,7 +169,7 @@ export class Engine {
         };
 
         this.lines.push(listener);
-        this.send(this.goCommand());
+        this.send(this.goCommand(only));
       });
     } finally {
       this.send('setoption name MultiPV value 1');
@@ -183,9 +184,10 @@ export class Engine {
     }));
   }
 
-  private goCommand(): string {
-    if (this.options.depth) return `go depth ${this.options.depth}`;
-    return `go movetime ${this.options.moveTimeMs ?? 1000}`;
+  private goCommand(only?: readonly string[]): string {
+    const restrict = only && only.length > 0 ? ` searchmoves ${only.join(' ')}` : '';
+    if (this.options.depth) return `go depth ${this.options.depth}${restrict}`;
+    return `go movetime ${this.options.moveTimeMs ?? 1000}${restrict}`;
   }
 
   private async isReady(): Promise<void> {

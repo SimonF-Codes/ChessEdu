@@ -15,5 +15,8 @@
     "@chessedu/db": "*",
     "drizzle-orm": "^0.38.3",
     "tsx": "^4.19.2"
+  },
+  "devDependencies": {
+    "chess.js": "^1.4.0"
   }
 }

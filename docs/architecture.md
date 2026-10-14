@@ -871,13 +871,19 @@ real, a `move_commentary` table is the obvious next step.
 
 The repertoire (§11) shows the lines a player has played. The line drill teaches ones they have
 not: a fixed sequence, repeated move by move until it is automatic, with a record of **where** it
-breaks. First and only opening so far: the Ponziani (C44, `1.e4 e5 2.Nf3 Nc6 3.c3`), learner as
-White. The decisions and what lost are in [ADR 0006](./adr/0006-opening-line-drill.md) and
+breaks. Which openings are drilled is read from the player's own games: the families that cost
+the most points (`games × (0.5 − score)`, at least 40 games, never one that scores 50% or more),
+three at a time, plus the Ponziani (C44, `1.e4 e5 2.Nf3 Nc6 3.c3`, as White), which was the pilot.
+The decisions and what lost are in [ADR 0006](./adr/0006-opening-line-drill.md),
 [ADR 0007](./adr/0007-line-coverage-and-replay.md), which replaced 0006's branching rule and added
-replay.
+replay, and [ADR 0009](./adr/0009-openings-from-the-games.md), which chose the openings from the
+history and the opponent's replies from what was actually played.
 
 ```mermaid
 flowchart LR
+    G[("game + move")] -->|"loadFamilyRecords()"| CH["chooseOpenings()<br/>points lost, ≥ 40 games"]
+    CH -->|"LineSpec per family"| GEN
+    G -->|"loadFacedReplies()<br/>what opponents played"| GEN
     ECO[("ECO book<br/>defaultBook()")] -->|"names only"| GEN["generateLines()<br/>packages/chess/src/lines.ts"]
     SF["Stockfish MultiPV<br/>apps/worker Engine"] -->|"White: best move<br/>Black: replies near best"| GEN
     GEN --> SCRIPT["lines/generate.ts<br/>(run by hand)"]
@@ -892,24 +898,40 @@ flowchart LR
     LA -->|"summariseLineHistory()"| UI
 ```
 
-**Who chooses the moves.** Inside the root the opening's own definition does. After it, White's
-move at every node is **Stockfish's best move** — one answer per position. Black **branches on the
-replies Stockfish rates within a margin of its best**, capped per decision (`selectReplies`,
-`PONZIANI_BRANCHING`: up to 6 within 100 cp at `3.c3`, up to 3 within 50 cp at the next decision),
-and plays Stockfish's single best move after that. For the Ponziani that is 15 lines, including
-`3...d6` and `3...a6`, which ECO does not name. The ECO book only **names** a line: the deepest
+**Which openings.** `chooseOpenings` (`packages/chess/src/opening-choice.ts`) ranks opening
+families by points lost. A family is Chess.com's `eco_url` name with its moves stripped, cut after
+its first `Defense` or `Gambit` (`openingFamily`), per side. Its root is the family's most common
+move sequence up to the first move that identifies it among the player's games on that side
+(`familyRoot`: `1.d4 e5` for the Englund, `1.d4 d5 2.c4` for the Queen's Gambit); its learner is the
+side the player had; a Black line is 12 plies, so it still ends on the learner's move. The rule is
+pure; `apps/worker/src/lines/history.ts` feeds it from `game` and `move`.
+
+**Who chooses the moves.** Inside the root the opening's own definition does. After it, the
+learner's move at every node is **Stockfish's best move** — one answer per position. The
+opponent's replies at a node are, first, **the ones the player has faced there** at least 5 times
+(`chooseReplies`, `source: 'games'`), most frequent first, unless Stockfish rates one more than
+150 cp worse than its best — a popular reply that loses is not theory. Slots left under the cap are
+filled with **the replies Stockfish rates within a margin of its best** (`selectReplies`;
+`PONZIANI_BRANCHING` and `FAMILY_BRANCHING`: up to 6 within 100 cp at the first decision, up to 3
+within 50 cp at the next). Past those, the opponent plays its most-faced vetted reply, else
+Stockfish's best. The Ponziani, the pilot, keeps margin-only branching so its reviewed lines stay
+live: 15 lines, including `3...d6` and `3...a6`, which ECO does not name. The ECO book only **names** a line: the deepest
 named position it passes, plus any branch choices after it (`Ponziani Opening · 3...a6, 4...d6`).
-Lines are `LINE_DEPTH_PLIES` (11) long, so each ends on the learner's move, and every line is
+Lines are `LINE_DEPTH_PLIES` (11) long for White and 12 for Black, so each ends on the learner's move, and every line is
 drilled from move one, shared prefix included. The model plays no part: which move is right is an
 evaluation, and §6 gives evaluations to the engine.
 
 **Generation is a script, not a job.** `npm run lines:generate --workspace @chessedu/worker`
-replays the tree against the worker's `Engine` at a fixed depth and upserts into `opening_line`,
-retiring lines the run no longer produces. Lines are shared content that changes when the engine
-or the book does, not per user — see ADR 0006.
+reads the history of one chess account (`--account`, or the only verified one), prints the
+standings, and for the Ponziani and the top `--families` (default 3) replays the tree against the
+worker's `Engine` at a fixed depth and upserts into `opening_line`, retiring lines of that family
+the run no longer produces. A family that drops out of the top three keeps its lines. Lines are a
+shared catalogue, not per user — see ADR 0006 and ADR 0009.
 
-**The drill.** `/lines` picks the most overdue line the user has reviewed, else one they have
-never tried. The learner plays White; Black's reply from the stored line is played back at once.
+**The drill.** `/lines` lists the families with live lines and opens one (`?family=`, else the
+first with a line due); within it, it picks the most overdue line the user has reviewed, else one
+they have never tried. The board is turned to the learner's side, and the opponent's moves from
+the stored line are played back at once.
 
 | The learner | The board |
 |---|---|
@@ -970,8 +992,9 @@ flowchart LR
 - **It writes nothing.** No `line_attempt`, no `line_review`, no SM-2 — the route reads and its
   client component has no server action. Learning is not measurement.
 - **What kind of move it is** is said from the ply's `source`: part of the opening's definition,
-  the engine's single choice, or one of *n* replies the engine rated close to its best (a
-  `branch`, *n* counted from the stored lines).
+  the engine's single choice, one of *n* replies the engine rated close to its best (a
+  `branch`, *n* counted from the stored lines), or a reply the player's own opponents chose and
+  the engine vetted (`games`, ADR 0009).
 - **Playing a different move on the board asks about it.** A move another stored line plays from
   that position is explained and offered as a switch; anything else gets "I have not analysed that
   move." and is taken back.
@@ -979,8 +1002,9 @@ flowchart LR
   `/lines?line={id}` drills that line, graded or not by the same `isGradedAttempt` rule as any
   other attempt. A line the learner has never attempted offers *Learn it first* above the board.
 
-**Not handled, deliberately.** Transpositions (a line is its move order), Black repertoires, other
-openings, and the review coach explaining a missed drill move.
+**Not handled, deliberately.** Transpositions (a line is its move order), the player's own choices
+as the learner's moves (the engine's are drilled), and the review coach explaining a missed drill
+move.
 
 ## 16. Open questions
 

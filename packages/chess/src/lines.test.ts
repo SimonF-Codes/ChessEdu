@@ -1,17 +1,22 @@
 import { Chess } from 'chess.js';
 import { describe, expect, it } from 'vitest';
 
-import { buildBook, defaultBook, parseEcoTsv } from './book';
+import { buildBook, defaultBook, parseEcoTsv, positionKey } from './book';
 import {
   type BranchRule,
+  type FacedReplies,
   type LineSpec,
   type RankMoves,
   type RankedMove,
+  FACED_MIN_GAMES,
+  FACED_VETO_CP,
   LINE_DEPTH_PLIES,
   PLY_PV_LIMIT,
   PONZIANI,
   PONZIANI_BRANCHING,
+  chooseReplies,
   generateLines,
+  lineDepthFor,
   lineKey,
   moveScore,
   nameLine,
@@ -35,9 +40,10 @@ function fenAfter(sans: readonly string[]): string {
  * A scripted engine with no opinion: every legal move in chess.js's own order, all scored level,
  * so a rule's cap alone decides how many survive. The walk is under test, not the engine.
  */
-const flat: RankMoves = async (fen, count) =>
+const flat: RankMoves = async (fen, count, only) =>
   new Chess(fen)
     .moves({ verbose: true })
+    .filter((move) => !only || only.includes(uciOf(move)))
     .slice(0, count)
     .map((move) => ({ uci: uciOf(move), scoreCp: 0, mateIn: null }));
 
@@ -271,6 +277,13 @@ describe('nameLine', () => {
   it('adds nothing for a move the engine chose alone', () => {
     const named = nameLine(pliesFor([...ROOT, 'a6', 'd4'], []), TOY_BOOK, TOY);
     expect(named.name).toBe('Toy Opening');
+  });
+
+  it('adds a reply taken from the player’s games, like a branch', () => {
+    const plies = pliesFor([...ROOT, 'a6', 'd4'], []).map((ply) =>
+      ply.ply === 6 ? { ...ply, source: 'games' as const } : ply,
+    );
+    expect(nameLine(plies, TOY_BOOK, TOY).name).toBe('Toy Opening · 3...a6');
   });
 
   it('falls back to the spec when the book knows nothing', () => {
@@ -619,5 +632,304 @@ describe('generateLines — engine facts on every searched ply', () => {
         seen.set(key, ply.facts);
       }
     }
+  });
+});
+
+describe('lineDepthFor', () => {
+  it('ends every line on the learner’s move: 11 plies for White, 12 for Black', () => {
+    expect(lineDepthFor('w')).toBe(LINE_DEPTH_PLIES);
+    expect(lineDepthFor('b')).toBe(LINE_DEPTH_PLIES + 1);
+  });
+});
+
+/** UCI for a SAN move from the position after `path`. */
+function uciAt(path: readonly string[], san: string): string {
+  const board = new Chess(fenAfter(path));
+  return uciOf(board.move(san));
+}
+
+describe('chooseReplies — the player’s games first, the engine as a veto (ADR 0009)', () => {
+  const rule: BranchRule = { maxReplies: 6, marginCp: 100 };
+  const faced = (entries: [uci: string, games: number][]) => new Map(entries);
+
+  it('puts the replies the player has faced first, most frequent first, whatever the engine prefers', () => {
+    const chosen = chooseReplies({
+      ranked: ranked([
+        ['a', 0],
+        ['b', -10],
+        ['c', -20],
+      ]),
+      faced: faced([
+        ['c', 30],
+        ['b', 10],
+      ]),
+      rule,
+    });
+    expect(chosen).toEqual([
+      { uci: 'c', measured: true },
+      { uci: 'b', measured: true },
+      { uci: 'a', measured: false },
+    ]);
+  });
+
+  it(`vetoes a faced reply more than ${FACED_VETO_CP} cp worse than the engine’s best: a popular loss is not theory`, () => {
+    const chosen = chooseReplies({
+      ranked: ranked([
+        ['best', 20],
+        ['edge', 20 - FACED_VETO_CP],
+        ['loses', 19 - FACED_VETO_CP],
+      ]),
+      faced: faced([
+        ['loses', 90],
+        ['edge', 40],
+      ]),
+      rule: { maxReplies: 2, marginCp: 0 },
+    });
+    expect(chosen.map((c) => c.uci)).toEqual(['edge', 'best']);
+    expect(FACED_VETO_CP).toBe(150);
+  });
+
+  it('vetoes a faced reply that allows mate, however popular', () => {
+    const chosen = chooseReplies({
+      ranked: [
+        { uci: 'best', scoreCp: 0, mateIn: null },
+        { uci: 'blunder', scoreCp: null, mateIn: -2 },
+      ],
+      faced: faced([['blunder', 500]]),
+      rule,
+    });
+    expect(chosen.map((c) => c.uci)).toEqual(['best']);
+  });
+
+  it(`ignores a reply faced fewer than ${FACED_MIN_GAMES} times — an anecdote, not a measurement`, () => {
+    const chosen = chooseReplies({
+      ranked: ranked([
+        ['a', 0],
+        ['rare', -10],
+      ]),
+      faced: faced([['rare', FACED_MIN_GAMES - 1]]),
+      rule: { maxReplies: 1, marginCp: 100 },
+    });
+    expect(chosen).toEqual([{ uci: 'a', measured: false }]);
+    expect(FACED_MIN_GAMES).toBe(5);
+  });
+
+  it('keeps the rule’s cap: the most frequent faced replies win the slots', () => {
+    const chosen = chooseReplies({
+      ranked: ranked([
+        ['a', 0],
+        ['b', 0],
+        ['c', 0],
+        ['d', 0],
+      ]),
+      faced: faced([
+        ['a', 5],
+        ['b', 50],
+        ['c', 20],
+        ['d', 10],
+      ]),
+      rule: { maxReplies: 3, marginCp: 100 },
+    });
+    expect(chosen.map((c) => c.uci)).toEqual(['b', 'c', 'd']);
+  });
+
+  it('fills the slots left with ADR 0007’s margin rule, which still bounds them', () => {
+    const chosen = chooseReplies({
+      ranked: ranked([
+        ['a', 0],
+        ['b', -30],
+        ['c', -120],
+        ['faced', -140],
+      ]),
+      faced: faced([['faced', 12]]),
+      rule,
+    });
+    expect(chosen).toEqual([
+      { uci: 'faced', measured: true },
+      { uci: 'a', measured: false },
+      { uci: 'b', measured: false },
+    ]);
+  });
+
+  it('with no faced replies is exactly selectReplies', () => {
+    const moves = ranked([
+      ['a', 0],
+      ['b', -30],
+      ['c', -120],
+    ]);
+    expect(chooseReplies({ ranked: moves, faced: undefined, rule }).map((c) => c.uci)).toEqual(
+      selectReplies(moves, rule),
+    );
+  });
+
+  it('past the branching rules plays the most-faced reply that survives the veto, else the engine’s best', () => {
+    const moves = ranked([
+      ['a', 0],
+      ['b', -40],
+      ['c', -400],
+    ]);
+    expect(
+      chooseReplies({
+        ranked: moves,
+        faced: faced([
+          ['c', 90],
+          ['b', 30],
+        ]),
+        rule: undefined,
+      }),
+    ).toEqual([{ uci: 'b', measured: true }]);
+    expect(chooseReplies({ ranked: moves, faced: undefined, rule: undefined })).toEqual([
+      { uci: 'a', measured: false },
+    ]);
+  });
+
+  it('breaks a tie in frequency by the engine’s score, then by move', () => {
+    const chosen = chooseReplies({
+      ranked: ranked([
+        ['c', -10],
+        ['b', -10],
+        ['a', 0],
+      ]),
+      faced: faced([
+        ['c', 20],
+        ['b', 20],
+        ['a', 20],
+      ]),
+      rule,
+    });
+    expect(chosen.map((c) => c.uci)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('does not choose a faced reply the engine has not scored — it cannot be vetted', () => {
+    const chosen = chooseReplies({
+      ranked: ranked([['a', 0]]),
+      faced: faced([['unscored', 80]]),
+      rule,
+    });
+    expect(chosen.map((c) => c.uci)).toEqual(['a']);
+  });
+});
+
+describe('generateLines — opponent replies from the player’s games (ADR 0009)', () => {
+  const AT_ROOT = positionKey(fenAfter(ROOT));
+  const a6 = uciAt(ROOT, 'a6');
+  const qg5 = uciAt(ROOT, 'Qg5');
+
+  /** PONZIANI_ENGINE, plus a restricted search that scores the moves it is limited to. */
+  const SCORES = new Map([
+    [a6, -53],
+    [qg5, -400],
+  ]);
+  const engine: RankMoves = async (fen, count, only) => {
+    if (!only) return PONZIANI_ENGINE(fen, count);
+    return only.map((uci) => ({ uci, scoreCp: SCORES.get(uci) ?? 0, mateIn: null }));
+  };
+
+  const facedAtRoot: FacedReplies = new Map([
+    [
+      AT_ROOT,
+      new Map([
+        [qg5, 50],
+        [a6, 20],
+      ]),
+    ],
+  ]);
+
+  it('branches on what the player faced, vetted, then fills from the engine’s margin', async () => {
+    const lines = await generateLines(TOY, {
+      book: EMPTY_BOOK,
+      rankMoves: engine,
+      faced: facedAtRoot,
+    });
+    const first = [...new Set(lines.map((line) => line.plies[5]!.san))];
+    // TOY caps the first decision at three: 3...a6 from the games, then d5 and Nf6 by margin.
+    // 3...Qg5 was faced more often, but the engine has it four pawns down.
+    expect(first).toEqual(['a6', 'd5', 'Nf6']);
+    const sourceOf = (san: string) => lines.find((l) => l.plies[5]!.san === san)!.plies[5]!.source;
+    expect(sourceOf('a6')).toBe('games');
+    expect(sourceOf('d5')).toBe('branch');
+  });
+
+  it('scores the faced replies the engine’s own ranking did not reach with a restricted search', async () => {
+    const asked: [string, number, readonly string[] | undefined][] = [];
+    await generateLines(TOY, {
+      book: EMPTY_BOOK,
+      rankMoves: async (fen, count, only) => {
+        asked.push([fen, count, only]);
+        return engine(fen, count, only);
+      },
+      faced: facedAtRoot,
+    });
+    const restricted = asked.filter(([, , only]) => only);
+    expect(restricted).toHaveLength(1);
+    expect(positionKey(restricted[0]![0])).toBe(AT_ROOT);
+    expect(new Set(restricted[0]![2])).toEqual(new Set([qg5, a6]));
+  });
+
+  it('stores facts for a faced reply from the restricted search', async () => {
+    const lines = await generateLines(TOY, {
+      book: EMPTY_BOOK,
+      rankMoves: engine,
+      faced: facedAtRoot,
+    });
+    const line = lines.find((l) => l.plies[5]!.san === 'a6')!;
+    // Black's -53 is White's +53; the best other reply, 3...d5, is +14 for Black.
+    expect(line.plies[5]!.facts).toMatchObject({ scoreCp: 53, gapCp: -67 });
+  });
+
+  it('builds a Black repertoire: the replies to 1.e4 d5 in the shape the games give', async () => {
+    const root = ['e4', 'd5'];
+    const counts: [string, number][] = [
+      ['exd5', 104],
+      ['e5', 82],
+      ['Nc3', 54],
+      ['Qf3', 22],
+      ['d3', 20],
+      ['Nf3', 3],
+    ];
+    const faced: FacedReplies = new Map([
+      [positionKey(fenAfter(root)), new Map(counts.map(([san, n]) => [uciAt(root, san), n]))],
+    ]);
+    const spec: LineSpec = {
+      family: 'scandinavian-defense-black',
+      eco: 'B01',
+      name: 'Scandinavian Defense',
+      rootSan: root,
+      learnerColor: 'b',
+      depthPlies: lineDepthFor('b'),
+      branching: [{ maxReplies: 6, marginCp: 100 }],
+    };
+    const lines = await generateLines(spec, { book: EMPTY_BOOK, rankMoves: flat, faced });
+
+    const replies = [...new Set(lines.map((line) => line.plies[2]!.san))];
+    expect(replies.slice(0, 5)).toEqual(['exd5', 'e5', 'Nc3', 'Qf3', 'd3']);
+    // The sixth slot comes from the engine's margin: 2.Nf3 was met only three times.
+    expect(replies).toHaveLength(6);
+    for (const line of lines) {
+      expect(line.plies).toHaveLength(12);
+      expect(line.plies.at(-1)!.color).toBe('b');
+      expect(line.learnerColor).toBe('b');
+      expect(line.key.startsWith('b:')).toBe(true);
+    }
+  });
+
+  it('plays a faced reply past the branching rules, instead of the engine’s', async () => {
+    const atRoot = scripted({
+      [ROOT.join(' ')]: [
+        ['d5', 10],
+        ['f6', 0],
+      ],
+    });
+    const lines = await generateLines(
+      { ...TOY, branching: [] },
+      {
+        book: EMPTY_BOOK,
+        rankMoves: (fen, count, only) =>
+          positionKey(fen) === AT_ROOT ? atRoot(fen, count, only) : flat(fen, count, only),
+        faced: new Map([[AT_ROOT, new Map([[uciAt(ROOT, 'f6'), 7]])]]),
+      },
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0]!.plies[5]).toMatchObject({ san: 'f6', source: 'games' });
   });
 });

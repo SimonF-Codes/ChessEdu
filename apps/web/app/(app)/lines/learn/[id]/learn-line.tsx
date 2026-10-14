@@ -195,7 +195,7 @@ export function LearnLine({
         <div className="space-y-2 border-t border-neutral-200 pt-4 dark:border-neutral-800">
           <p className="text-neutral-500">Ready to be tested on it?</p>
           <Link
-            href={`/lines?line=${line.id}`}
+            href={`/lines?family=${encodeURIComponent(line.family)}&line=${line.id}`}
             className="inline-block rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white dark:bg-white dark:text-neutral-900"
           >
             Drill this line

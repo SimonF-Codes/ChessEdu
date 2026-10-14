@@ -99,7 +99,8 @@ export function formatScore(facts: PlyFacts | null | undefined): string | null {
 
 /**
  * What kind of move this is, from where the generator took it. A `branch` is one of several
- * replies the engine rated close to its best; an `engine` move is its single choice (ADR 0007).
+ * replies the engine rated close to its best; an `engine` move is its single choice (ADR 0007);
+ * a `games` reply is one the player's own opponents chose, vetted by the engine (ADR 0009).
  * `branchCount` is how many replies the stored lines hold at this node, when the caller knows.
  */
 export function describeSource(
@@ -118,6 +119,10 @@ export function describeSource(
       return branchCount !== undefined && branchCount > 1
         ? `One of ${branchCount} replies the engine rated close to its best. This line follows this one; the others are lines of their own.`
         : 'One of several replies the engine rated close to its best. This line follows this one; the others are lines of their own.';
+    case 'games':
+      return branchCount !== undefined && branchCount > 1
+        ? `One of ${branchCount} replies stored here, and one your own opponents have played — often enough in your games to have a line of its own. The engine vetted it: a popular reply that simply loses is not drilled.`
+        : 'A reply your own opponents have played, often enough in your games to have a line of its own. The engine vetted it: a popular reply that simply loses is not drilled.';
     case 'book':
       return 'A continuation from the opening book, stored before the engine chose the branches.';
   }

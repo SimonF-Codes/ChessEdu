@@ -4,6 +4,7 @@ export * from './deviation';
 export * from './game-review';
 export * from './lines';
 export * from './link';
+export * from './opening-choice';
 export * from './pgn';
 export * from './repertoire';
 export * from './session-order';
